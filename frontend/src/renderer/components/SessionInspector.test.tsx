@@ -2475,7 +2475,7 @@ describe("SessionInspector summary reviews", () => {
     await openReviewsSection();
 
     expect(
-      await screen.findByRole("button", { name: /Select reviewer agent/ }),
+      await screen.findByRole("button", { name: /Reviewer agent/ }),
     ).toHaveTextContent("Codex");
     expect(screen.queryByText("reviewer")).not.toBeInTheDocument();
   });
@@ -2525,7 +2525,7 @@ describe("SessionInspector summary reviews", () => {
     await openReviewsSection();
 
     const trigger = await screen.findByRole("button", {
-      name: /Select reviewer agent/,
+      name: /Reviewer agent/,
     });
     expect(trigger).toHaveTextContent("Claude Code");
     expect(trigger).not.toHaveTextContent("claude-code");
@@ -2600,11 +2600,13 @@ describe("SessionInspector summary reviews", () => {
     );
     await openReviewsSection();
 
+    // Auto review owns the run while idle, so the reviewer session row is not
+    // rendered at all rather than shown with every control disabled.
     expect(
-      screen.getByRole("button", { name: "Review latest commit" }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "Review latest commit" }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Select reviewer agent" }),
+      screen.getByRole("button", { name: "Reviewer agent" }),
     ).toBeDisabled();
     const toggle = screen.getByRole("switch", { name: "Auto review" });
     expect(toggle).toBeChecked();
@@ -2832,7 +2834,7 @@ describe("SessionInspector summary reviews", () => {
     await openReviewsSection();
 
     expect(
-      screen.getByRole("button", { name: /Select reviewer agent/ }),
+      screen.getByRole("button", { name: /Reviewer agent/ }),
     ).toHaveTextContent("Codex");
     expect(screen.queryByText("Reviewable change 3")).not.toBeInTheDocument();
     expect(await screen.findByText("Reviewable change 4")).toBeInTheDocument();
@@ -3708,7 +3710,7 @@ describe("SessionInspector summary reviews", () => {
     await openReviewsSection();
 
     await userEvent.click(
-      await screen.findByRole("button", { name: /Select reviewer agent/ }),
+      await screen.findByRole("button", { name: /Reviewer agent/ }),
     );
     await userEvent.click(
       await screen.findByRole("menuitem", { name: /opencode/ }),
@@ -3772,7 +3774,7 @@ describe("SessionInspector summary reviews", () => {
     );
     await openReviewsSection();
 
-    await userEvent.click(await screen.findByRole("button", { name: /Select reviewer agent/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Reviewer agent/ }));
     await userEvent.click(await screen.findByRole("menuitem", { name: /codex/i }));
     await waitFor(() =>
       expect(screen.getByRole("menuitem", { name: "GPT-5 Mini" })).toBeInTheDocument(),
@@ -3829,7 +3831,7 @@ describe("SessionInspector summary reviews", () => {
     );
     await openReviewsSection();
 
-    await userEvent.click(await screen.findByRole("button", { name: /Select reviewer agent/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Reviewer agent/ }));
     await userEvent.click(await screen.findByRole("menuitem", { name: /codex/i }));
     await waitFor(() =>
       expect(screen.getByRole("menuitem", { name: "GPT-5 Mini" })).toBeInTheDocument(),
@@ -3876,7 +3878,7 @@ describe("SessionInspector summary reviews", () => {
     renderWithQuery(<SessionInspector session={session([pr(3, "open")])} />);
     await openReviewsSection();
 
-    await userEvent.click(await screen.findByRole("button", { name: /Select reviewer agent/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Reviewer agent/ }));
     await userEvent.click(await screen.findByRole("menuitem", { name: /^opencode$/i }));
 
     await waitFor(() =>
@@ -3938,7 +3940,7 @@ describe("SessionInspector summary reviews", () => {
     renderWithQuery(<SessionInspector session={session([pr(3, "open")])} />);
     await openReviewsSection();
 
-    await userEvent.click(await screen.findByRole("button", { name: /Select reviewer agent/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Reviewer agent/ }));
     await userEvent.click(await screen.findByRole("menuitem", { name: /^opencode$/i }));
     await waitFor(() =>
       expect(postMock).toHaveBeenCalledWith(
@@ -3949,7 +3951,7 @@ describe("SessionInspector summary reviews", () => {
         },
       ),
     );
-    await userEvent.click(await screen.findByRole("button", { name: /Select reviewer agent/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Reviewer agent/ }));
     await userEvent.click(await screen.findByRole("menuitem", { name: /^opencode$/i }));
     expect(await screen.findByRole("menuitem", { name: "Suggested A" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /^custom opencode model$/i })).not.toBeInTheDocument();
@@ -3984,7 +3986,7 @@ describe("SessionInspector summary reviews", () => {
     renderWithQuery(<SessionInspector session={session([pr(3, "open")])} />);
     await openReviewsSection();
 
-    await userEvent.click(await screen.findByRole("button", { name: /Select reviewer agent/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Reviewer agent/ }));
     await userEvent.click(await screen.findByRole("menuitem", { name: /^opencode$/i }));
     await waitFor(() =>
       expect(postMock).toHaveBeenCalledWith(
@@ -4029,7 +4031,7 @@ describe("SessionInspector summary reviews", () => {
     renderWithQuery(<SessionInspector session={session([pr(3, "open")])} />);
     await openReviewsSection();
 
-    await userEvent.click(await screen.findByRole("button", { name: /Select reviewer agent/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Reviewer agent/ }));
     await userEvent.click(await screen.findByRole("menuitem", { name: /codex/i }));
 
     await waitFor(() =>
@@ -4068,7 +4070,7 @@ describe("SessionInspector summary reviews", () => {
     await openReviewsSection();
 
     const picker = await screen.findByRole("button", {
-      name: /Select reviewer agent/,
+      name: /Reviewer agent/,
     });
     await userEvent.click(picker);
     await userEvent.click(screen.getByRole("menuitem", { name: /codex/i }));
@@ -4101,7 +4103,7 @@ describe("SessionInspector summary reviews", () => {
     await openReviewsSection();
 
     const picker = await screen.findByRole("button", {
-      name: /Select reviewer agent/,
+      name: /Reviewer agent/,
     });
     await userEvent.click(picker);
     expect(screen.getAllByRole("menuitem", { name: /codex/i })).toHaveLength(1);
@@ -4231,7 +4233,7 @@ describe("SessionInspector summary reviews", () => {
       screen.queryByText("claude-code found nothing blocking."),
     ).not.toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole("button", { name: /Select reviewer agent/ }),
+      screen.getByRole("button", { name: /Reviewer agent/ }),
     );
     await userEvent.click(
       screen.getByRole("menuitem", { name: /claude-code/ }),
@@ -4263,7 +4265,7 @@ describe("SessionInspector summary reviews", () => {
     // alongside it. Say so rather than silently ignoring the choice.
     expect(screen.getByText("Review in progress · Codex")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Select reviewer agent/ }),
+      screen.getByRole("button", { name: /Reviewer agent/ }),
     ).toBeDisabled();
   });
 
@@ -4427,7 +4429,7 @@ describe("SessionInspector summary reviews", () => {
     await openReviewsSection();
 
     expect(
-      await screen.findByRole("button", { name: /Select reviewer agent/ }),
+      await screen.findByRole("button", { name: /Reviewer agent/ }),
     ).toHaveTextContent("Codex");
     expect(screen.queryByText("reviewer")).not.toBeInTheDocument();
     expect(screen.queryByText("sess-1")).not.toBeInTheDocument();
