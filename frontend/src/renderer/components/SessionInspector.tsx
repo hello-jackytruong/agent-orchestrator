@@ -2046,7 +2046,6 @@ function LocalReviewsSection({
 				}}
 				reviewerHandleId={reviewsQuery.data?.reviewerHandleId ?? ""}
 				reviewerSurface={reviewsQuery.data?.reviewerSurface}
-				reviewerActivityState={reviewsQuery.data?.reviewerActivityState}
 				activeReviewers={reviewsQuery.data?.activeReviewers ?? []}
 				onOpenReviewer={(surface) => {
 					if (surface.mode === "chat") onOpenReviewerChat?.(surface.reviewId);
@@ -2821,7 +2820,6 @@ function ReviewPanel({
 	reviewStates,
 	reviewerHandleId,
 	reviewerSurface,
-	reviewerActivityState,
 	activeReviewers,
 	onOpenReviewer,
 	isLoading,
@@ -2849,7 +2847,6 @@ function ReviewPanel({
 	reviewStates: PRReviewState[];
 	reviewerHandleId: string;
 	reviewerSurface?: components["schemas"]["ListReviewsResponse"]["reviewerSurface"];
-	reviewerActivityState?: components["schemas"]["ListReviewsResponse"]["reviewerActivityState"];
 	activeReviewers: ReviewerSurface[];
 	onOpenReviewer: (surface: ReviewerSurface) => void;
 	isLoading: boolean;
