@@ -4,6 +4,8 @@ import type { components } from "../../api/schema";
 import { apiClient } from "../lib/api-client";
 import { clientForHost } from "../lib/host-clients";
 import { LOCAL_HOST } from "../lib/hosts";
+import { mockSessionScmSummaries } from "../lib/mock-data";
+import { usesPreviewWorkspaceData } from "../lib/preview-mode";
 import type { CloudCpPullRequestSummary } from "../lib/cloud-cp";
 import { createRendererCloudCpClient } from "../lib/cloud-cp/renderer-client";
 import { subscribeSessionEventsBridged } from "../lib/cloud-cp/stream-bridge";
@@ -44,7 +46,12 @@ export function sessionScmSummaryQueryOptions(sessionId: string, hostId?: string
 	return {
 		queryKey: sessionScmSummaryQueryKey(sessionId, hostId),
 		enabled: Boolean(sessionId),
-		queryFn: () => fetchSessionScmSummary(sessionId, hostId),
+		queryFn: async () => {
+			if (usesPreviewWorkspaceData) {
+				return { prs: mockSessionScmSummaries[sessionId] ?? [], linkedPrs: [] };
+			}
+			return fetchSessionScmSummary(sessionId, hostId);
+		},
 		retry: 1,
 		...(hostId ? { refetchInterval: 15_000 } : {}),
 	};

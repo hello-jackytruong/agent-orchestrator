@@ -14,7 +14,7 @@ import {
 	SessionInspectorShellView,
 	SessionInspectorSummaryView,
 	inspectorEmptyClass,
-	inspectorReviewHeadingClass,
+	inspectorSectionHeadingClass,
 	type InspectorPullRequest,
 	type InspectorInlineComment,
 	type InspectorGithubReview,
@@ -36,7 +36,7 @@ import {
 	Info,
 	Play,
 	Loader2,
-	MessageSquare,
+	SearchCheck,
 	X,
 } from "lucide-react";
 import type { components } from "../../api/schema";
@@ -136,7 +136,7 @@ const VIEW_DEFS: {
 	{
 		id: "reviews",
 		labelKey: "inspector.reviewTab",
-		icon: <MessageSquare aria-hidden="true" />,
+		icon: <SearchCheck aria-hidden="true" />,
 	},
 	{
 		id: "browser",
@@ -452,7 +452,7 @@ const SummaryView = memo(function SummaryView({
 					onOpenFiles={onOpenFiles}
 					openPRNumber={openPRNumber}
 					pullRequests={hasPRs ? (
-						<Section surface={false} title={prSectionTitle}>
+						<Section surface={false} title={prSectionTitle} titleClassName={inspectorSectionHeadingClass}>
 							<div className="flex flex-col gap-1.5">
 								{prSummaries.map((pr) => (
 									<PRSummaryCard
@@ -476,13 +476,13 @@ const SummaryView = memo(function SummaryView({
 			workers={showWorkers ? <OrchestratorChildrenSection session={session} /> : undefined}
 			usage={
 				showUsageError ? (
-					<Section title={t("inspector.usage.title")}>
+					<Section title={t("inspector.usage.title")} titleClassName={inspectorSectionHeadingClass}>
 						<p className={inspectorEmptyClass} role="alert">
 							{t("inspector.usage.processedTokensUnavailable")}
 						</p>
 					</Section>
 				) : showUsage && usageQuery.data ? (
-					<Section title={t("inspector.usage.title")}>
+					<Section title={t("inspector.usage.title")} titleClassName={inspectorSectionHeadingClass}>
 						<UsageCostTelemetry usage={usageQuery.data} />
 					</Section>
 				) : null
@@ -538,7 +538,7 @@ function InspectorPolicyRow({
 	return (
 		<div className={cn("flex items-center justify-between gap-3 py-1", className)} data-slot="inspector-policy-row">
 			<div className="flex min-w-0 items-center gap-1.5">
-				<label className="min-w-0 text-xs font-medium text-settings-label" htmlFor={id}>
+				<label className="min-w-0 text-xs font-normal text-settings-label" htmlFor={id}>
 					{label}
 				</label>
 				{description ? (
@@ -1328,11 +1328,15 @@ function SessionControls({ session, hostId }: { session: WorkspaceSession; hostI
 	);
 
 	if (isStandaloneSession) {
-		return <Section title={t("inspector.sessionControls")}>{terminateAction}</Section>;
+		return (
+			<Section title={t("inspector.sessionControls")} titleClassName={inspectorSectionHeadingClass}>
+				{terminateAction}
+			</Section>
+		);
 	}
 
 	return (
-		<Section title={t("inspector.sessionControls")}>
+		<Section title={t("inspector.sessionControls")} titleClassName={inspectorSectionHeadingClass}>
 			<AutoInjectCIPolicyControl hostId={hostId} session={session} />
 			<AutoInjectReviewPolicyControl hostId={hostId} session={session} />
 			{session.kind === "orchestrator" ? null : canTerminateNow ? (
@@ -1995,8 +1999,24 @@ function LocalReviewsSection({
 				(pr.review?.unresolvedBy ?? []).some((reviewer) => reviewer.count > 0) ||
 				(pr.review?.resolvedBy ?? []).some((reviewer) => reviewer.count > 0)),
 	);
+	const openReviewStates = openReviewStatesFor(session, reviewStates);
+	const hasReviewerSession = (reviewsQuery.data?.reviewerHandleId ?? "").trim() !== "";
+	const reviewLive = reviewHasLiveActivity(
+		openReviewStates,
+		reviewsQuery.data?.reviewerActivityState,
+		hasReviewerSession,
+	);
+	const runningRun = openReviewStates.find((review) => review.status === "running")?.latestRun;
+	const resolvedDefaultHarness = resolveDefaultReviewerHarness(projectConfigQuery.data, session.provider);
+	const activeReviewerHarness =
+		runningRun?.harness || reviewerOverride || resolvedDefaultHarness;
+	const liveReviewLabel = reviewLive
+		? cancelReview.isPending
+			? t("inspector.review.cancelling")
+			: t("inspector.review.inProgressAgent", { agent: agentLabel(activeReviewerHarness) })
+		: undefined;
 	return (
-		<div className="p-2">
+		<>
 			{/* Running a review is an action; reading them is a list. The action stays
 			    on top, then one list carrying both sources keyed by PR. */}
 			<ReviewPanel
@@ -2067,13 +2087,14 @@ function LocalReviewsSection({
 				hostId={hostId}
 				githubPRs={githubReviews}
 				isLoading={scmSummary.isLoading}
+				liveReviewLabel={liveReviewLabel}
 				onOpenReviewFile={onOpenReviewFile}
 				onWorkerMessageSent={onWorkerMessageSent}
 				reviewStates={reviewStates}
 				runs={reviewsQuery.data?.runs ?? []}
 				session={session}
 			/>
-		</div>
+		</>
 	);
 }
 
@@ -2327,6 +2348,7 @@ function MergedReviewsSection({
 	githubPRs,
 	hostId,
 	isLoading,
+	liveReviewLabel,
 	onOpenReviewFile,
 	onWorkerMessageSent,
 	reviewStates,
@@ -2336,6 +2358,7 @@ function MergedReviewsSection({
 	githubPRs: SessionPRSummary[];
 	hostId?: string;
 	isLoading: boolean;
+	liveReviewLabel?: string;
 	onOpenReviewFile?: (target: { line?: number; path: string }) => void;
 	onWorkerMessageSent?: () => void;
 	reviewStates: PRReviewState[];
@@ -2635,6 +2658,7 @@ function MergedReviewsSection({
 			externalLink={ProductExternalLink}
 			groups={groups}
 			isLoading={isLoading}
+			liveReviewLabel={liveReviewLabel}
 			labels={labels}
 			onRequestRereview={requestRereview}
 			onResolveInlineComment={resolveInlineComment}
@@ -2877,10 +2901,18 @@ function ReviewPanel({
 		return () => window.clearTimeout(timer);
 	}, [dismissedAutoFailureId, latestAutoFailure]);
 	if (sortedPRs(session).length === 0) {
-		return <p className={inspectorEmptyClass}>{t("inspector.noPROpened")}</p>;
+		return (
+			<Section title={t("inspector.review.controls")} titleClassName={inspectorSectionHeadingClass} surface={false}>
+				<p className={inspectorEmptyClass}>{t("inspector.noPROpened")}</p>
+			</Section>
+		);
 	}
 	if (isLoading) {
-		return <p className={inspectorEmptyClass}>{t("inspector.loadingReviews")}</p>;
+		return (
+			<Section title={t("inspector.review.controls")} titleClassName={inspectorSectionHeadingClass} surface={false}>
+				<p className={inspectorEmptyClass}>{t("inspector.loadingReviews")}</p>
+			</Section>
+		);
 	}
 
 	const openReviewStates = openReviewStatesFor(session, reviewStates);
@@ -2895,14 +2927,11 @@ function ReviewPanel({
 		.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 	const latest = runningRun ?? newestRun;
 	const resolvedDefaultHarness = resolveDefaultReviewerHarness(config, session.provider);
-	const effectiveReviewerHarness = reviewerOverride || resolvedDefaultHarness;
-	const activeReviewerHarness = latest?.harness || effectiveReviewerHarness;
 	const autoReviewFailure =
 		latestAutoFailure && latestAutoFailure.id !== dismissedAutoFailureId ? latestAutoFailure.body.trim() : null;
 	const hasReviewerSession = reviewerHandleId.trim() !== "" ||
 		Boolean(reviewerSurface?.mode === "chat" && reviewerSurface.reviewId);
 	const reviewRunning = reviewIsRunning(openReviewStates);
-	const reviewLive = reviewHasLiveActivity(openReviewStates, reviewerActivityState, hasReviewerSession);
 	const reviewHasRun = reviewRunning || Boolean(latest);
 	const runAction = reviewSessionRunAction(openReviewStates, isTriggering);
 	const runDisabled = isKilling || isSwitchingReviewer || (cloud && !cloudReviewerReady) || reviewRunDisabled(openReviewStates, isTriggering);
@@ -2915,13 +2944,7 @@ function ReviewPanel({
 	const killDisabled = isKilling || isCancelling || isTriggering || isSwitchingReviewer || !hasReviewerSession;
 
 	return (
-		<div className="mb-2.5 flex flex-col">
-				<Section
-					surface
-					surfaceClassName="px-0"
-					title={t("inspector.review.controls")}
-					titleClassName={inspectorReviewHeadingClass}
-				>
+		<Section title={t("inspector.review.controls")} titleClassName={inspectorSectionHeadingClass} surface={false}>
 					{error ? (
 						<p className="m-0 rounded-md border border-error/28 bg-error/8 px-2.5 py-2 text-sm-md leading-normal text-error">
 							{apiErrorMessage(error, t("inspector.reviewRequestFailed"))}
@@ -2953,10 +2976,10 @@ function ReviewPanel({
 				{/* Spacing carries the separation here, not rules: three rows do not
 				    need ruling off from each other, and the gap reads the way the
 				    summary tab's groups do. */}
-				<div className="review-run-controls-container flex min-w-0 flex-col gap-1 text-xs">
+				<div className="review-run-controls-container flex min-w-0 flex-col text-xs">
 					{cloud ? (
-						<div className="flex min-h-10 min-w-0 items-center justify-between gap-3 py-2">
-							<span className="min-w-0 text-xs font-medium text-foreground">{t("inspector.selectReviewerAgent")}</span>
+						<div className="flex items-center justify-between gap-3 py-1">
+							<span className="min-w-0 text-xs font-normal text-settings-label">{t("inspector.selectReviewerAgent")}</span>
 							<div className="flex min-w-0 items-center justify-end gap-1.5">
 								<Select
 									disabled={reviewRunning || isTriggering || isCancelling || isInstallingCloudHarness}
@@ -2995,8 +3018,8 @@ function ReviewPanel({
 							</div>
 						</div>
 					) : (
-					<div className="flex min-h-10 min-w-0 items-center justify-between gap-3 py-2">
-						<span className="min-w-0 text-xs font-medium text-foreground">
+					<div className="flex items-center justify-between gap-3 py-1">
+						<span className="min-w-0 text-xs font-normal text-settings-label">
 							{t("inspector.selectReviewerAgent")}
 						</span>
 						<ReviewerSelect
@@ -3022,7 +3045,7 @@ function ReviewPanel({
 					    whenever any of them is not the selected reviewer. */}
 					{activeReviewers.some((surface) => surface.reviewId !== reviewerSurface?.reviewId)
 						? activeReviewers.map((surface) => (
-								<div className="flex min-h-10 min-w-0 items-center justify-between gap-3 py-2" key={surface.reviewId}>
+								<div className="flex items-center justify-between gap-3 py-1" key={surface.reviewId}>
 									<span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground">
 										<AgentAvatar className="size-4" decorative provider={surface.harness} />
 										<span className="truncate">{agentLabel(surface.harness)}</span>
@@ -3042,7 +3065,6 @@ function ReviewPanel({
 						: null}
 					<InspectorPolicyRow
 						checked={autoReviewEnabled}
-						className="min-h-10 py-2"
 						disabled={isAutoReviewSaving}
 						id={`auto-review-${sessionUiKey(session.id, hostId)}`}
 						label={t("inspector.autoReview")}
@@ -3053,8 +3075,8 @@ function ReviewPanel({
 					    exception is a review actually in flight: stopping it is reachable
 					    from nowhere else, so the row comes back for as long as it runs. */}
 					{autoReviewEnabled && !reviewRunning ? null : (
-						<div className="flex min-h-10 min-w-0 items-center justify-between gap-3 py-2">
-							<span className="text-xs font-medium text-foreground">{t("inspector.review.session")}</span>
+						<div className="flex items-center justify-between gap-3 py-1">
+							<span className="text-xs font-normal text-settings-label">{t("inspector.review.session")}</span>
 							<div className="flex min-w-0 items-center justify-end gap-1.5">
 								<Button
 									aria-label={primaryReviewActionLabel}
@@ -3092,18 +3114,7 @@ function ReviewPanel({
 						</div>
 					)}
 				</div>
-				{reviewLive ? (
-					<div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
-						<Loader2 aria-hidden="true" className="size-icon-sm shrink-0 animate-spin text-muted-foreground" />
-						<span className="min-w-0 flex-1 truncate text-2xs font-medium text-muted-foreground">
-							{isCancelling
-								? t("inspector.review.cancelling")
-								: `Review in progress · ${agentLabel(activeReviewerHarness)}`}
-						</span>
-					</div>
-				) : null}
-			</Section>
-		</div>
+		</Section>
 	);
 }
 

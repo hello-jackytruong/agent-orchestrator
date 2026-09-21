@@ -42,7 +42,7 @@ test("review controls stay aligned and collapse the run action at minimum width"
 
 	const inspector = await openInspector(page);
 	await inspector.getByRole("tab", { name: "Reviews" }).click();
-	await expect(inspector.getByText("Review controls")).toBeVisible();
+	await expect(inspector.getByText("Reviewer agent", { exact: true })).toBeVisible();
 
 	const reviewerLabel = inspector.getByText("Reviewer agent", { exact: true });
 	const reviewerSelect = inspector.getByRole("button", { name: "Reviewer agent" });

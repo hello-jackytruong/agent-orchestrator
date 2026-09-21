@@ -2075,11 +2075,9 @@ describe("SessionInspector Activity section", () => {
     );
 
     for (const title of ["Pull request", "Session controls", "Activity"]) {
-      const heading = screen.getByText(title).parentElement;
-      expect(heading?.parentElement).toHaveAttribute(
-        "data-testid",
-        "inspector-section",
-      );
+      expect(
+        screen.getByText(title).closest('[data-testid="inspector-section"]'),
+      ).toBeInTheDocument();
     }
   });
 
@@ -2282,11 +2280,11 @@ describe("SessionInspector tabs", () => {
     renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
     const tabs = screen.getAllByRole("tab").map((el) => el.textContent?.trim());
     expect(tabs).toEqual(["Summary", "Reviews", "Browser", "Files"]);
-    expect(screen.queryByText("Review controls")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reviewer agent", { exact: true })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: "Reviews" }));
 
-    expect(await screen.findByText("Review controls")).toBeInTheDocument();
+    expect(await screen.findByText("Reviewer agent", { exact: true })).toBeInTheDocument();
     expect(screen.queryByText("Pull request")).not.toBeInTheDocument();
   });
 
@@ -2296,7 +2294,7 @@ describe("SessionInspector tabs", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: "Reviews" }));
 
-    expect(await screen.findByText("Review controls")).toBeInTheDocument();
+    expect(await screen.findByText("Reviewer agent", { exact: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Review latest commit" })).not.toBeDisabled();
   });
 
@@ -2314,7 +2312,7 @@ describe("SessionInspector tabs", () => {
       "aria-selected",
       "true",
     );
-    expect(screen.queryByText("Review controls")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reviewer agent", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("View review details")).not.toBeInTheDocument();
   });
 
@@ -2816,7 +2814,8 @@ describe("SessionInspector summary reviews", () => {
     await screen.findByText("Review in progress · Codex");
 
     expect(screen.queryByText("Reviewable change 3")).not.toBeInTheDocument();
-    expect(screen.queryByText("Review summary")).not.toBeInTheDocument();
+    expect(screen.getByTestId("review-live-card")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reviews" })).toBeInTheDocument();
   });
 
   it("shows eligible and up-to-date open PR review rows", async () => {
@@ -3400,9 +3399,9 @@ describe("SessionInspector summary reviews", () => {
     ).toHaveLength(2);
     expect(comments).toHaveTextContent("a.ts:3");
     expect(comments).toHaveTextContent("a.ts:9");
-    // AO's runs and the PR's own reviews share one section keyed by PR, so the
-    // unresolved count rides the same row as the AO verdict.
-    expect(screen.getByText("Review summary")).toBeInTheDocument();
+    // AO's runs and GitHub reviews share one section keyed by PR under Reviews.
+    expect(screen.getAllByText("Reviews").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId("review-pr-row")).toBeInTheDocument();
     expect(
       screen.queryByText("Reviews on the pull request"),
     ).not.toBeInTheDocument();
@@ -4490,6 +4489,7 @@ describe("SessionInspector summary reviews", () => {
     expect(
       screen.queryByRole("switch", { name: "Automatically fix review comments" }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText("Pull request")).not.toBeInTheDocument();
     expect(screen.queryByText("No pull request opened yet.")).not.toBeInTheDocument();
   });
 
