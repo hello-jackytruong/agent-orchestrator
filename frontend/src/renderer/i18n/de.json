@@ -644,6 +644,7 @@
 	"inspector.review.requestedByAgent": "Requested by agent",
 	"inspector.review.restoreSession": "Review-Sitzung wiederherstellen",
 	"inspector.review.restoringSession": "Review-Sitzung wird wiederhergestellt...",
+	"inspector.review.inProgressAgent": "Review läuft · {{agent}}",
 	"inspector.review.reviewing": "Review läuft...",
 	"inspector.review.run": "Review ausführen",
 	"inspector.review.runLatest": "PR erneut prüfen",
