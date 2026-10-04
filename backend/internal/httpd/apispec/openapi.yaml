@@ -3279,6 +3279,288 @@ paths:
       summary: Initialize a selected folder as a Git repository with an initial commit
       tags:
       - projects
+  /api/v1/provider-accounts:
+    get:
+      operationId: listProviderAccounts
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderAccountsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: List local managed accounts and separate provider primaries
+      tags:
+      - agents
+  /api/v1/provider-accounts/{accountId}:
+    delete:
+      operationId: removeProviderAccount
+      parameters:
+      - in: path
+        name: accountId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderAccountChangeRequest'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderAccountsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Remove an account and reassign idle managed sessions
+      tags:
+      - agents
+  /api/v1/provider-accounts/{accountId}/primary:
+    put:
+      operationId: setProviderPrimary
+      parameters:
+      - in: path
+        name: accountId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderAccountsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Set the default for new sessions only
+      tags:
+      - agents
+  /api/v1/provider-accounts/{accountId}/sign-out:
+    post:
+      operationId: signOutProviderAccount
+      parameters:
+      - in: path
+        name: accountId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderAccountChangeRequest'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderAccountsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Sign out and reassign idle managed sessions
+      tags:
+      - agents
+  /api/v1/provider-accounts/login:
+    post:
+      operationId: startProviderAccountLogin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderLoginRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderLoginResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Start a local managed account sign-in
+      tags:
+      - agents
+  /api/v1/provider-accounts/login/{loginId}:
+    delete:
+      operationId: cancelProviderAccountLogin
+      parameters:
+      - in: path
+        name: loginId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Cancel a pending managed login
+      tags:
+      - agents
+    get:
+      operationId: getProviderAccountLogin
+      parameters:
+      - in: path
+        name: loginId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderLoginResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Verify login and register its account
+      tags:
+      - agents
   /api/v1/prs/{id}/merge:
     post:
       operationId: mergePR
@@ -6822,6 +7104,101 @@ paths:
           description: Gateway Timeout
       summary: Start a session-owned server from .ao/launch.json and open its application
         preview
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/provider-account:
+    get:
+      operationId: getSessionProviderAccount
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionProviderAccountResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Read a managed session's account
+      tags:
+      - sessions
+    put:
+      operationId: setSessionProviderAccount
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderAccountChangeRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionProviderAccountResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Switch an idle managed session's account
       tags:
       - sessions
   /api/v1/sessions/{sessionId}/restore:
@@ -11184,6 +11561,8 @@ components:
           type: string
         projectId:
           type: string
+        providerAccountId:
+          type: string
         taskPreparation:
           type: string
       required:
@@ -12734,6 +13113,109 @@ components:
       - providerTurnId
       - activityId
       type: object
+    ProviderAccountChangeRequest:
+      properties:
+        accountId:
+          type: string
+        replacementPrimaryId:
+          type: string
+      type: object
+    ProviderAccountView:
+      properties:
+        email:
+          type: string
+        id:
+          type: string
+        primary:
+          type: boolean
+        provider:
+          enum:
+          - codex
+          - claude
+          type: string
+        sessions:
+          items:
+            type: string
+          type: array
+        signedIn:
+          type: boolean
+      required:
+      - id
+      - provider
+      - email
+      - signedIn
+      - primary
+      - sessions
+      type: object
+    ProviderAccountsResponse:
+      properties:
+        accounts:
+          items:
+            $ref: '#/components/schemas/ProviderAccountView'
+          type: array
+        defaults:
+          items:
+            $ref: '#/components/schemas/ProviderPrimaryView'
+          type: array
+        recoveryRequired:
+          type: boolean
+      required:
+      - accounts
+      - defaults
+      - recoveryRequired
+      type: object
+    ProviderLoginRequest:
+      properties:
+        accountId:
+          type: string
+        provider:
+          enum:
+          - codex
+          - claude
+          type: string
+      required:
+      - provider
+      type: object
+    ProviderLoginResponse:
+      properties:
+        accountId:
+          type: string
+        id:
+          type: string
+        provider:
+          type: string
+        status:
+          enum:
+          - waiting
+          - complete
+          - failed
+          - cancelled
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - provider
+      - url
+      - status
+      - accountId
+      type: object
+    ProviderPrimaryView:
+      properties:
+        managed:
+          type: boolean
+        primaryId:
+          type: string
+        provider:
+          enum:
+          - codex
+          - claude
+          type: string
+      required:
+      - provider
+      - primaryId
+      - managed
+      type: object
     PushDeviceEnvelope:
       properties:
         device:
@@ -13630,6 +14112,22 @@ components:
       required:
       - sessionId
       type: object
+    SessionProviderAccountResponse:
+      properties:
+        accountId:
+          type: string
+        loginRequired:
+          type: boolean
+        managed:
+          type: boolean
+        provider:
+          type: string
+      required:
+      - managed
+      - provider
+      - accountId
+      - loginRequired
+      type: object
     SessionResponse:
       properties:
         session:
@@ -14086,6 +14584,8 @@ components:
           type: string
         prompt:
           maxLength: 16384
+          type: string
+        providerAccountId:
           type: string
         trackerProvider:
           enum:

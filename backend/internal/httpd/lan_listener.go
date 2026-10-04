@@ -67,6 +67,7 @@ var lanControlBlockedPrefixes = []string{
 	"/api/v1/browser",
 	"/api/v1/desktop",
 	"/api/v1/system/install",
+	"/api/v1/provider-accounts",
 	"/api/v1/agents/codex/accounts",
 	"/api/v1/agents/codex/account-switches",
 }
@@ -97,6 +98,9 @@ func isLANControlBlockedRequest(method, path string) bool {
 // beneath it ("/api/v1/mobile/status") but must not catch unrelated siblings
 // such as "/api/v1/mobileapp".
 func isLANControlBlockedPath(path string) bool {
+	if strings.HasPrefix(path, "/api/v1/sessions/") && strings.HasSuffix(strings.TrimSuffix(path, "/"), "/provider-account") {
+		return true
+	}
 	if strings.HasPrefix(path, "/api/v1/sessions/") && strings.HasSuffix(strings.TrimSuffix(path, "/"), "/preview/server") {
 		return true
 	}

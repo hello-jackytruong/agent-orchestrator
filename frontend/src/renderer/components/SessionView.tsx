@@ -1,3 +1,4 @@
+import { SessionProviderAccount } from "./SessionProviderAccount";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe2, Loader2, PanelRight, Plus } from "lucide-react";
 import { useBlocker } from "@tanstack/react-router";
@@ -2262,6 +2263,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId }: SessionViewPro
 							className="relative z-chrome flex h-inspector-tabs w-full shrink-0 overflow-hidden"
 							data-testid="session-topbar-host"
 						/>
+						{session && !session.cloud ? <SessionProviderAccount key={session.id} sessionId={session.id} /> : null}
 						<div className="relative min-h-0 flex-1" ref={bindHandoffDialogContainer}>
 							{cloudStage === "paused_by_coder" ? <CloudPausedStatus /> : null}
 							{session && !session.cloud && handoffDialogContainer ? (

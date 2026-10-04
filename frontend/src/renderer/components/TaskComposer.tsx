@@ -49,6 +49,8 @@ import {
 	type TaskComposerAgentPreference,
 } from "../lib/task-composer-preferences";
 
+import { accountProvider, useProviderAccounts } from "../hooks/useProviderAccounts";
+
 type Project = components["schemas"]["Project"];
 type DelegateAgent = components["schemas"]["DelegateTaskRequest"]["agent"];
 
@@ -60,6 +62,7 @@ type CreateTaskInput = {
 	effort?: string;
 	mode?: "chat" | "tui";
 	approvalMode?: "bypass-permissions";
+	providerAccountId?: string;
 	attachments?: FileAttachmentPayload[];
 	taskPreparation?: string;
 };
@@ -204,6 +207,7 @@ export function TaskComposer({
 						...(input.model ? { model: input.model } : {}),
 						...(input.effort !== undefined ? { effort: input.effort } : {}),
 						...(input.mode ? { mode: input.mode } : {}),
+					...(input.providerAccountId ? { providerAccountId: input.providerAccountId } : {}),
 						...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
 						...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments } : {}),
 						...(input.taskPreparation ? { taskPreparation: input.taskPreparation } : {}),
@@ -254,6 +258,7 @@ export function TaskComposer({
 					model: input.model,
 					...(input.effort ? { effort: input.effort } : {}),
 					...(input.mode ? { mode: input.mode } : {}),
+					...(input.providerAccountId ? { providerAccountId: input.providerAccountId } : {}),
 					...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
 					...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments } : {}),
 				},
@@ -487,8 +492,16 @@ export function TaskComposer({
 		selectedAgent !== "" &&
 		settings?.defaultSessionMode === "chat" &&
 		!settings.chatHarnesses.includes(selectedAgent);
+	const providerAccounts = useProviderAccounts(!isCloudProject);
+	const [chosenAccount, setChosenAccount] = useState({ provider: "", id: "" });
+	const accountProviderId = accountProvider(selectedAgent);
+	const accountDefault = providerAccounts.data?.defaults.find(p => p.provider === accountProviderId);
+	const chosenAccountId = chosenAccount.provider === accountProviderId ? chosenAccount.id : "";
+	const accountChoices = providerAccounts.data?.accounts.filter(a => a.provider === accountProviderId && a.signedIn) ?? [];
+	const managedAccountReady = !accountDefault?.managed || accountChoices.some(a => a.id === (chosenAccountId || accountDefault.primaryId));
 	const canSubmit =
 		Boolean(projectId) &&
+		(isCloudProject || managedAccountReady) &&
 		(!isStandalone || selectedAgent !== "") &&
 		(isCloudProject || isStandalone || projectQuery.data !== undefined);
 	const refreshSelectedModels = useCallback(async () => {
@@ -551,6 +564,7 @@ export function TaskComposer({
 				brief,
 				agent: selectedAgent ? (selectedAgent as CreateTaskInput["agent"]) : undefined,
 				model: requestedModel,
+				providerAccountId: !isCloudProject ? chosenAccountId || undefined : undefined,
 				// Only explicit Codex picks set this; agent changes reset it, and TUI retries preserve it.
 				effort: requestedEffort,
 				mode: interfaceMode,
@@ -597,6 +611,13 @@ export function TaskComposer({
 	};
 
 	return (
+		<>
+		{!isCloudProject && accountProviderId && accountDefault?.managed ? <label className="flex items-center gap-2 px-3 py-2 text-xs">{t("providerAccounts.accountLabel")}
+			<select aria-label={t("providerAccounts.newSessionLabel")} value={chosenAccountId} onChange={event => setChosenAccount({ provider: accountProviderId, id: event.target.value })}>
+				<option value="">{accountDefault.primaryId ? t("providerAccounts.primaryOption", { email: accountChoices.find(a => a.id === accountDefault.primaryId)?.email ?? t("providerAccounts.accountFallback") }) : t("providerAccounts.newSessionLogin")}</option>
+				{accountChoices.map(a => <option key={a.id} value={a.id}>{a.email}</option>)}
+			</select>
+		</label> : null}
 		<TaskComposerView
 			autoFocusPrompt={autoFocusTitle}
 			canSubmit={canSubmit}
@@ -702,6 +723,7 @@ export function TaskComposer({
 				showFollowAgentAction={Boolean(catalogDefaultOption || !isConcreteModelID(projectModelOrMode))} />}
 			showEffort={!requiresTuiFallback && effortOptions.length > 0}
 		/>
+		</>
 	);
 }
 

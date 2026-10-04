@@ -20,7 +20,12 @@ vi.mock("../hooks/useAgentReadinessQuery", async (importOriginal) => {
 vi.mock("../lib/api-client", () => ({
 	apiClient: {
 		DELETE: (...args: unknown[]) => deleteMock(...args),
-		GET: (...args: unknown[]) => getMock(...args),
+		GET: (...args: unknown[]) => {
+			if (args[0] === "/api/v1/provider-accounts") {
+				return Promise.resolve({ data: { accounts: [], defaults: [], recoveryRequired: false } });
+			}
+			return getMock(...args);
+		},
 		POST: (...args: unknown[]) => postMock(...args),
 	},
 	apiErrorMessage: (error: unknown, fallback = "Request failed") => {

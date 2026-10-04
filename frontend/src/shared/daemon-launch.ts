@@ -4,6 +4,7 @@ export type DaemonLaunchSpec = {
 	cwd: string;
 	shell: boolean;
 	source: "configured" | "bundled" | "dev";
+	env?: Record<string, string>;
 };
 
 function joinPath(...segments: string[]): string {
@@ -46,6 +47,7 @@ export function resolveDaemonLaunch(
 		return {
 			command: "go",
 			args: ["run", "./cmd/ao", "daemon"],
+			env: { AO_PROXY_HOST_BINARY: env.AO_PROXY_HOST_BINARY || joinPath(appPath, "daemon", "ao-proxy-host") },
 			cwd: joinPath(appPath, "..", "backend"),
 			shell: false,
 			source: "dev",

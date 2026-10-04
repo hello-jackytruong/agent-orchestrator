@@ -339,6 +339,7 @@ func startSession(ctx context.Context, cfg config.Config, runtime runtimeselect.
 		Projects: store,
 		Launcher: reviewcore.NewLauncher(reviewers, runtime, cfg.DataDir,
 			reviewcore.WithRunFilePath(cfg.RunFilePath),
+			reviewcore.WithRelatedAccountEnv(mgr.RelatedAccountEnv),
 			reviewcore.WithAgentAuth(reviewerAgentAuth{readiness: agentReadiness}),
 			reviewcore.WithReviewerChat(reviewerChat)),
 	})
@@ -697,4 +698,19 @@ func (c chatLauncher) AbortChatHandoff(id domain.SessionID) {
 
 func (c chatLauncher) StopChat(ctx context.Context, id domain.SessionID) error {
 	return c.svc.StopChat(ctx, id)
+}
+
+func (c chatLauncher) AcquireAccountRoutingPause(ctx context.Context, id domain.SessionID) (func(), error) {
+	return c.svc.AcquireAccountRoutingPause(ctx, id)
+}
+
+func (c chatLauncher) AcquireReviewAccountPause(ctx context.Context, id string) (func(), error) {
+	controller, err := c.svc.ControllerForOwner(domain.ReviewConversationOwner(id))
+	if errors.Is(err, chatsvc.ErrNoController) {
+		return func() {}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return controller.AcquireAccountRoutingPause(ctx)
 }

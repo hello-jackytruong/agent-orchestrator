@@ -6,6 +6,7 @@ import { BrowserDownloadsSection } from "./BrowserDownloadsSection";
 import { BrowserProfilesSection } from "./BrowserProfilesSection";
 import { CloudCredentialsSection } from "./CloudCredentialsSection";
 import { CloudProviderSection } from "./CloudProviderSection";
+import { ProviderAccountsSection } from "./ProviderAccountsSection";
 import { CodexAccountsSection } from "./CodexAccountsSection";
 import { ConnectMobileContent } from "./ConnectMobileContent";
 import { GeneralSettingsSection } from "./GeneralSettingsSection";
@@ -56,6 +57,12 @@ const globalSettingsCatalog: SettingsCatalogItem[] = [
 		icon: BadgeCheck,
 		label: (t) => t("settings.agents"),
 		render: (_t, titleHidden) => <CodexAccountsSection titleHidden={titleHidden} />,
+	},
+	{
+		id: "accountManager",
+		icon: BadgeCheck,
+		label: (t) => t("providerAccounts.title"),
+		render: (_t, titleHidden) => <ProviderAccountsSection titleHidden={titleHidden} />,
 	},
 	{
 		id: "browserProfiles",

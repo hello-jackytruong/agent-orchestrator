@@ -369,6 +369,7 @@ type ListSessionsResponse struct {
 
 // SpawnSessionRequest is the body of POST /api/v1/sessions.
 type SpawnSessionRequest struct {
+	ProviderAccountID string `json:"providerAccountId,omitempty"`
 	// ProjectID is omitted for a standalone worker session.
 	ProjectID domain.ProjectID `json:"projectId,omitempty"`
 	IssueID   domain.IssueID   `json:"issueId,omitempty"`
@@ -977,10 +978,11 @@ type SendSessionMessageResponse struct {
 // DelegateTaskRequest is the body of POST /api/v1/orchestrators/delegate.
 // An omitted agent tells the orchestrator to use the project's worker default.
 type DelegateTaskRequest struct {
-	ProjectID domain.ProjectID    `json:"projectId"`
-	Brief     string              `json:"brief" maxLength:"16384"`
-	Agent     domain.AgentHarness `json:"agent,omitempty" enum:"claude-code,codex,aider,opencode,opencode-v2,grok,droid,amp,agy,crush,cursor,qwen,gemini,copilot,goose,auggie,continue,devin,cline,kimi,muse,kiro,kilocode,vibe,pi,kimchi,omp,fx,prime-agent,autohand,unreal-agent,mimo-code,deepseek-harness,fake"`
-	Model     string              `json:"model,omitempty" maxLength:"256"`
+	ProviderAccountID string              `json:"providerAccountId,omitempty"`
+	ProjectID         domain.ProjectID    `json:"projectId"`
+	Brief             string              `json:"brief" maxLength:"16384"`
+	Agent             domain.AgentHarness `json:"agent,omitempty" enum:"claude-code,codex,aider,opencode,opencode-v2,grok,droid,amp,agy,crush,cursor,qwen,gemini,copilot,goose,auggie,continue,devin,cline,kimi,muse,kiro,kilocode,vibe,pi,kimchi,omp,fx,prime-agent,autohand,unreal-agent,mimo-code,deepseek-harness,fake"`
+	Model             string              `json:"model,omitempty" maxLength:"256"`
 	// Effort is an explicit, provider-advertised model tuning override. Nil
 	// inherits the project default; an empty string selects the provider default.
 	Effort *string `json:"effort,omitempty" maxLength:"64"`
@@ -2948,4 +2950,70 @@ type MuteDeviceRequest struct {
 // routes.
 type InstallIDParam struct {
 	InstallID string `path:"installId" description:"The device's stable install id."`
+}
+
+// ProviderAccountView exposes account identity and usage without private credential references.
+type ProviderAccountView struct {
+	ID       string   `json:"id"`
+	Provider string   `json:"provider" enum:"codex,claude"`
+	Email    string   `json:"email"`
+	SignedIn bool     `json:"signedIn"`
+	Primary  bool     `json:"primary"`
+	Sessions []string `json:"sessions"`
+}
+
+// ProviderPrimaryView describes the default account for new sessions of one provider.
+type ProviderPrimaryView struct {
+	Provider  string `json:"provider" enum:"codex,claude"`
+	PrimaryID string `json:"primaryId"`
+	Managed   bool   `json:"managed"`
+}
+
+// ProviderAccountsResponse contains the account catalogue, defaults, and recovery state.
+type ProviderAccountsResponse struct {
+	Accounts         []ProviderAccountView `json:"accounts"`
+	Defaults         []ProviderPrimaryView `json:"defaults"`
+	RecoveryRequired bool                  `json:"recoveryRequired"`
+}
+
+// ProviderAccountChangeRequest selects an account or a replacement primary for an account operation.
+type ProviderAccountChangeRequest struct {
+	AccountID            string `json:"accountId,omitempty"`
+	ReplacementPrimaryID string `json:"replacementPrimaryId,omitempty"`
+}
+
+// ForceRequestBody preserves the optional replacement-primary JSON body on DELETE in OpenAPI.
+func (ProviderAccountChangeRequest) ForceRequestBody() {}
+
+// ProviderLoginRequest starts a new login or signs an existing entry in again.
+type ProviderLoginRequest struct {
+	Provider  string `json:"provider" enum:"codex,claude"`
+	AccountID string `json:"accountId,omitempty"`
+}
+
+// ProviderLoginResponse exposes login progress and its browser link without OAuth state.
+type ProviderLoginResponse struct {
+	ID        string `json:"id"`
+	Provider  string `json:"provider"`
+	URL       string `json:"url"`
+	Status    string `json:"status" enum:"waiting,complete,failed,cancelled"`
+	AccountID string `json:"accountId"`
+}
+
+// SessionProviderAccountResponse describes whether a session has a managed account assignment.
+type SessionProviderAccountResponse struct {
+	Managed       bool   `json:"managed"`
+	Provider      string `json:"provider"`
+	AccountID     string `json:"accountId"`
+	LoginRequired bool   `json:"loginRequired"`
+}
+
+// ProviderAccountIDParam identifies an account in a route.
+type ProviderAccountIDParam struct {
+	ID string `path:"accountId"`
+}
+
+// ProviderLoginIDParam identifies a login attempt in a route.
+type ProviderLoginIDParam struct {
+	ID string `path:"loginId"`
 }

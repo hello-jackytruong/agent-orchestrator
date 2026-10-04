@@ -378,10 +378,11 @@ type conversationSettingsStore interface {
 // Manager coordinates internal session spawn, restore, kill, and cleanup over
 // the outbound ports. User-facing read-model assembly lives in the service package.
 type Manager struct {
-	runtime   runtimeController
-	agents    ports.AgentResolver
-	workspace ports.Workspace
-	store     Store
+	providerAccounts ports.ProviderAccountRouting
+	runtime          runtimeController
+	agents           ports.AgentResolver
+	workspace        ports.Workspace
+	store            Store
 	// agentSwitchReporting supplies the exact authorization snapshot immediately
 	// before each failure-aware store transaction. Nil is fail-closed.
 	agentSwitchReporting ports.AgentSwitchReportingPolicy
@@ -942,6 +943,14 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	// Resolve the effective agent config (project base + role override + spawn
 	// override) and validate the model before any durable state is created. A
 	// model the harness cannot honor should not leave a seed row behind.
+	managedAccountID, managedAccount := "", false
+	if m.providerAccounts != nil {
+		var routeErr error
+		managedAccountID, managedAccount, routeErr = m.providerAccounts.ResolveAccount(ctx, cfg.Harness, cfg.ProviderAccountID)
+		if routeErr != nil {
+			return domain.SessionRecord{}, 0, 0, routeErr
+		}
+	}
 	agentConfig := applySpawnAgentConfig(effectiveAgentConfig(cfg.Harness, cfg.Kind, project.Config), cfg.AgentConfig)
 	if err := validateSpawnModel(cfg.Harness, agentConfig.Model); err != nil {
 		return domain.SessionRecord{}, 0, 0, fmt.Errorf("spawn: %w: %s", ErrUnsupportedModel, err.Error())
@@ -1046,6 +1055,12 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		}
 	}
 	id := rec.ID
+	if managedAccount {
+		if err := m.providerAccounts.AssignAccount(ctx, id, cfg.Harness, managedAccountID); err != nil {
+			m.rollbackSpawnSeedRowAfterFailure(ctx, id)
+			return domain.SessionRecord{}, 0, 0, err
+		}
+	}
 	systemPromptFile, err := m.prepareSystemPromptFile(id, cfg.Harness, systemPrompt)
 	if err != nil {
 		if prep != nil {
@@ -1219,7 +1234,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	}
 	m.augmentAgentRuntimeEnv(agent, env)
 	pinRuntimePermissionEnv(env, adapterConfig.Permissions)
-	if validator, ok := agent.(ports.AgentLaunchAuthValidator); ok {
+	if validator, ok := agent.(ports.AgentLaunchAuthValidator); ok && !managedAccount {
 		status, authErr := validator.ValidateLaunchAuth(ctx, ws.Path, env)
 		if authErr != nil {
 			m.logger.Debug("spawn: launch authentication probe inconclusive; continuing",
@@ -2059,6 +2074,9 @@ func (m *Manager) markSpawnFailedTerminatedWithoutWorkspace(ctx context.Context,
 // fails, fall back to parking it terminated so a phantom row never looks live.
 func (m *Manager) rollbackSpawnSeedRow(ctx context.Context, id domain.SessionID) {
 	if deleted, err := m.store.DeleteSession(ctx, id); err == nil && deleted {
+		if err := m.forgetAccount(ctx, id); err != nil {
+			m.logger.Warn("revoke deleted session account ticket", "sessionID", id, "error", err)
+		}
 		m.cleanupSystemPromptDir(id)
 		m.cleanupAttachments(ctx, id)
 		return
@@ -2083,6 +2101,9 @@ func (m *Manager) rollbackSpawn(ctx context.Context, id domain.SessionID) (delet
 		return false, false, fmt.Errorf("rollback %s: %w", id, err)
 	}
 	if deleted {
+		if err := m.forgetAccount(ctx, id); err != nil {
+			return true, false, err
+		}
 		m.cleanupSystemPromptDir(id)
 		m.cleanupAttachments(ctx, id)
 		return true, false, nil
@@ -2844,7 +2865,15 @@ func (m *Manager) relaunchSessionWithPolicyAndGeneration(ctx context.Context, op
 	}
 	m.augmentAgentRuntimeEnv(agent, env)
 	pinRuntimePermissionEnv(env, agentConfig.Permissions)
-	if validator, ok := agent.(ports.AgentLaunchAuthValidator); ok {
+	managedAccount := false
+	if m.providerAccounts != nil {
+		_, managed, accountErr := m.providerAccounts.SessionAccount(ctx, rec.ID)
+		if accountErr != nil {
+			return RestoreResult{}, accountErr
+		}
+		managedAccount = managed
+	}
+	if validator, ok := agent.(ports.AgentLaunchAuthValidator); ok && !managedAccount {
 		status, authErr := validator.ValidateLaunchAuth(ctx, ws.Path, env)
 		if authErr != nil {
 			m.logger.Debug("restore: launch authentication probe inconclusive; continuing",
@@ -5216,6 +5245,9 @@ func (m *Manager) prepareWorkerLaunchEnv(
 	if err != nil {
 		return rec, nil, err
 	}
+	if err := m.applyAccountEnv(ctx, rec, env); err != nil {
+		return rec, nil, err
+	}
 	rec, err = m.persistBrowserCapabilityVerifier(ctx, rec, rec.ControllerOwner(), verifier)
 	if err != nil {
 		return rec, nil, fmt.Errorf("persist browser capability verifier: %w", err)
@@ -5234,6 +5266,9 @@ func (m *Manager) prepareChatControllerEnv(
 ) (domain.SessionRecord, map[string]string, error) {
 	env, verifier, err := m.launchRuntimeEnv(rec.ID, rec.ProjectID, rec.IssueID, projectEnv)
 	if err != nil {
+		return rec, nil, err
+	}
+	if err := m.applyAccountEnv(ctx, rec, env); err != nil {
 		return rec, nil, err
 	}
 	rec, err = m.persistBrowserCapabilityVerifier(ctx, rec, expected, verifier)
@@ -5845,6 +5880,9 @@ func (m *Manager) wrapAgentProcessWithLaunchID(agent ports.Agent, id domain.Sess
 	// process exit through native hooks and therefore do not need the wrapper.
 	// Without this env value an old source hook can overwrite the target's
 	// native session id after an in-place switch.
+	if env["AO_PROXY_ENDPOINT"] != "" {
+		argv = agentlaunch.CodexProxyArgv(argv, env)
+	}
 	env[EnvRuntimeLaunchID] = launchID
 	if augmenter, ok := agent.(ports.AgentRuntimeLaunchEnv); ok {
 		augmenter.AugmentRuntimeLaunchEnv(env, m.dataDir, id, launchID)

@@ -153,7 +153,18 @@ func schemaName(_ reflect.Type, defaultName string) string {
 // schemaNames is the exhaustive default→clean mapping for every type reflected
 // by projectOperations(). Add an entry when a new contract type is introduced;
 // the drift test fails until the spec is regenerated, which flags the gap.
-var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names include reset-credit contracts; no credential value is stored here.
+//
+//nolint:gosec // Public OpenAPI type names include reset-credit contracts; no credential value is stored here.
+var schemaNames = map[string]string{
+	"ControllersProviderAccountView":                       "ProviderAccountView",
+	"ControllersProviderPrimaryView":                       "ProviderPrimaryView",
+	"ControllersProviderAccountsResponse":                  "ProviderAccountsResponse",
+	"ControllersProviderAccountChangeRequest":              "ProviderAccountChangeRequest",
+	"ControllersProviderLoginRequest":                      "ProviderLoginRequest",
+	"ControllersProviderLoginResponse":                     "ProviderLoginResponse",
+	"ControllersSessionProviderAccountResponse":            "SessionProviderAccountResponse",
+	"ControllersProviderAccountIDParam":                    "ProviderAccountIDParam",
+	"ControllersProviderLoginIDParam":                      "ProviderLoginIDParam",
 	"ControllersSettingsResponse":                          "SettingsResponse",
 	"ControllersDesktopWorkspaceLocationResponse":          "DesktopWorkspaceLocationResponse",
 	"ControllersUpdateSessionInterfaceRequest":             "UpdateSessionInterfaceRequest",
@@ -599,6 +610,7 @@ type operation struct {
 func operations() []operation {
 	ops := append([]operation{}, eventOperations()...)
 	ops = append(ops, agentOperations()...)
+	ops = append(ops, providerAccountOperations()...)
 	ops = append(ops, projectOperations()...)
 	ops = append(ops, sessionOperations()...)
 	ops = append(ops, automationOperations()...)
@@ -2878,5 +2890,25 @@ func prOperations() []operation {
 			summary: "List repositories accessible with the stored GitHub token",
 			resps:   []respUnit{{http.StatusOK, map[string]any{"repos": []githubpat.Repo{}}}, {http.StatusUnauthorized, envelope.APIError{}}, {http.StatusInternalServerError, envelope.APIError{}}},
 		},
+	}
+}
+
+func providerAccountOperations() []operation {
+	account := []any{controllers.ProviderAccountIDParam{}}
+	login := []any{controllers.ProviderLoginIDParam{}}
+	session := []any{controllers.SessionIDParam{}}
+	success := []respUnit{{http.StatusOK, controllers.ProviderAccountsResponse{}}, {http.StatusBadRequest, envelope.APIError{}}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusConflict, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}}
+	loginResponses := []respUnit{{http.StatusOK, controllers.ProviderLoginResponse{}}, {http.StatusBadRequest, envelope.APIError{}}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusConflict, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}}
+	routeResponses := []respUnit{{http.StatusOK, controllers.SessionProviderAccountResponse{}}, {http.StatusBadRequest, envelope.APIError{}}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusConflict, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}}
+	return []operation{
+		{method: http.MethodGet, path: "/api/v1/provider-accounts", id: "listProviderAccounts", tag: "agents", summary: "List local managed accounts and separate provider primaries", resps: success},
+		{method: http.MethodPost, path: "/api/v1/provider-accounts/login", id: "startProviderAccountLogin", tag: "agents", summary: "Start a local managed account sign-in", reqBody: controllers.ProviderLoginRequest{}, resps: loginResponses},
+		{method: http.MethodGet, path: "/api/v1/provider-accounts/login/{loginId}", id: "getProviderAccountLogin", tag: "agents", summary: "Verify login and register its account", pathParams: login, resps: loginResponses},
+		{method: http.MethodDelete, path: "/api/v1/provider-accounts/login/{loginId}", id: "cancelProviderAccountLogin", tag: "agents", summary: "Cancel a pending managed login", pathParams: login, resps: []respUnit{{http.StatusNoContent, nil}, {http.StatusServiceUnavailable, envelope.APIError{}}}},
+		{method: http.MethodPut, path: "/api/v1/provider-accounts/{accountId}/primary", id: "setProviderPrimary", tag: "agents", summary: "Set the default for new sessions only", pathParams: account, resps: success},
+		{method: http.MethodPost, path: "/api/v1/provider-accounts/{accountId}/sign-out", id: "signOutProviderAccount", tag: "agents", summary: "Sign out and reassign idle managed sessions", pathParams: account, reqBody: controllers.ProviderAccountChangeRequest{}, optionalReqBody: true, resps: success},
+		{method: http.MethodDelete, path: "/api/v1/provider-accounts/{accountId}", id: "removeProviderAccount", tag: "agents", summary: "Remove an account and reassign idle managed sessions", pathParams: account, reqBody: controllers.ProviderAccountChangeRequest{}, optionalReqBody: true, resps: success},
+		{method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/provider-account", id: "getSessionProviderAccount", tag: "sessions", summary: "Read a managed session's account", pathParams: session, resps: routeResponses},
+		{method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/provider-account", id: "setSessionProviderAccount", tag: "sessions", summary: "Switch an idle managed session's account", pathParams: session, reqBody: controllers.ProviderAccountChangeRequest{}, resps: routeResponses},
 	}
 }

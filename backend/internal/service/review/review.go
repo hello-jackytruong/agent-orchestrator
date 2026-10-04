@@ -874,3 +874,8 @@ func (s *Service) currentHeadsByPR(ctx context.Context, workerID domain.SessionI
 func (s *Service) List(ctx context.Context, workerID domain.SessionID) (reviewcore.SessionReviews, error) {
 	return s.engine.List(ctx, workerID)
 }
+
+// AcquireAccountRoutingPause fences related reviewer work for a worker account change.
+func (s *Service) AcquireAccountRoutingPause(ctx context.Context, id domain.SessionID) (func(), error) {
+	return s.engine.AcquireAccountRoutingPause(ctx, id)
+}

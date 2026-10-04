@@ -27,6 +27,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/codexappserver"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/persistenthost"
 	chatdriverregistry "github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/registry"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/proxyhost"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/systemexec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/telemetry/policyauthority"
@@ -62,6 +63,7 @@ import (
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
+	provideraccountsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/provideraccounts"
 	reportsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/report"
 	settingssvc "github.com/aoagents/agent-orchestrator/backend/internal/service/settings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/systemcheck"
@@ -561,6 +563,38 @@ func Run() error {
 	}
 	sessionSvc.SetChatProviderPreserver(chatSvc.PreservesProviderOnRestart)
 	sessMgr = wiredSessMgr
+	proxyBinaryName := "ao-proxy-host"
+	if runtime.GOOS == "windows" {
+		proxyBinaryName += ".exe"
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate account helper: %w", err)
+	}
+	proxyBinary := cfg.ProxyHostBinary
+	if proxyBinary == "" {
+		proxyBinary = filepath.Join(filepath.Dir(executable), proxyBinaryName)
+	}
+	client, err := proxyhost.New(filepath.Join(cfg.DataDir, "proxy"), proxyBinary)
+	if err != nil {
+		return fmt.Errorf("load managed account identity: %w", err)
+	}
+	key, err := client.TicketKey()
+	if err != nil {
+		return fmt.Errorf("load managed account ticket key: %w", err)
+	}
+	guard, guardOK := sessMgr.(ports.ProviderAccountSessionGuard)
+	routing, routingOK := sessMgr.(interface {
+		SetProviderAccounts(ports.ProviderAccountRouting)
+	})
+	if !guardOK || !routingOK {
+		return errors.New("session manager lacks managed account boundaries")
+	}
+	providerAccounts := provideraccountsvc.New(store, client, guard, key, client.Endpoint(), uuid.NewString)
+	providerLogin := provideraccountsvc.NewLoginCoordinator(providerAccounts, client, uuid.NewString)
+	routing.SetProviderAccounts(providerAccounts)
+	sessionSvc.SetProviderAccounts(providerAccounts)
+
 	if tunable, ok := sessMgr.(interface {
 		SetModelCatalog(interface {
 			Models(context.Context, string, string, bool) (ports.AgentModelCatalog, error)
@@ -577,6 +611,26 @@ func Run() error {
 	lcStack.LCM.SetSessionInputLease(sessMgr)
 	lcStack.LCM.SetSessionOperationGate(sessMgr)
 	termMgr.SetSessionInputLease(sessMgr)
+	if err := providerAccounts.RestoreHost(ctx); err != nil {
+		log.Warn("managed account recovery requires attention", "error", err)
+	}
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		reported := false
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				failure := providerAccounts.RestoreHost(ctx)
+				if failure != nil && ctx.Err() == nil && !reported {
+					log.Warn("managed account helper requires attention", "error", failure)
+				}
+				reported = failure != nil
+			}
+		}
+	}()
 	projectSvc := projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink, Logger: log, OnModelScopeChanged: agentSvc.InvalidateProjectModelCatalogs})
 	reportSessions, ok := sessMgr.(reportSemanticSession)
 	if !ok {
@@ -859,40 +913,42 @@ func Run() error {
 	}
 
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
-		Projects:           projectSvc,
-		HostID:             hostIdentity.HostID,
-		Endpoints:          bs,
-		Agents:             agentSvc,
-		CodexAccounts:      agentSvc,
-		SystemChecks:       systemChecks,
-		Installer:          systemInstall,
-		Sessions:           sessionSvc,
-		Automations:        automationSvc,
-		DesktopWorkspaces:  sessionSvc,
-		PRs:                prActions,
-		Reviews:            reviewSvc,
-		Notifications:      notifier,
-		Reports:            reportSvc,
-		NotificationStream: notificationHub,
-		Push:               pushRegistry,
-		Presence:           presenceTracker,
-		DeviceRoster:       deviceRoster,
-		DeviceLive:         presenceTracker,
-		Import:             importsvc.New(importsvc.Deps{Store: store}),
-		Directories:        fsbrowsersvc.New(),
-		ShellTerminals:     shellTermSvc,
-		Cues:               cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
-		AgentAuth:          agentAuthSvc,
-		GitHub:             githubpat.New(cfg.DataDir),
-		Conversations:      chatSvc,
-		Settings:           settingsSvc,
-		CDC:                store,
-		Events:             cdcPipe.Broadcaster,
-		Activity:           lcStack.LCM,
-		UsageHooks:         usageCollector,
-		UsageSummary:       usagesvc.NewSummaryReader(store),
-		Telemetry:          telemetrySink,
-		Mobile:             mc,
+		Projects:             projectSvc,
+		HostID:               hostIdentity.HostID,
+		Endpoints:            bs,
+		Agents:               agentSvc,
+		CodexAccounts:        agentSvc,
+		ProviderAccounts:     providerAccounts,
+		ProviderAccountLogin: providerLogin,
+		SystemChecks:         systemChecks,
+		Installer:            systemInstall,
+		Sessions:             sessionSvc,
+		Automations:          automationSvc,
+		DesktopWorkspaces:    sessionSvc,
+		PRs:                  prActions,
+		Reviews:              reviewSvc,
+		Notifications:        notifier,
+		Reports:              reportSvc,
+		NotificationStream:   notificationHub,
+		Push:                 pushRegistry,
+		Presence:             presenceTracker,
+		DeviceRoster:         deviceRoster,
+		DeviceLive:           presenceTracker,
+		Import:               importsvc.New(importsvc.Deps{Store: store}),
+		Directories:          fsbrowsersvc.New(),
+		ShellTerminals:       shellTermSvc,
+		Cues:                 cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
+		AgentAuth:            agentAuthSvc,
+		GitHub:               githubpat.New(cfg.DataDir),
+		Conversations:        chatSvc,
+		Settings:             settingsSvc,
+		CDC:                  store,
+		Events:               cdcPipe.Broadcaster,
+		Activity:             lcStack.LCM,
+		UsageHooks:           usageCollector,
+		UsageSummary:         usagesvc.NewSummaryReader(store),
+		Telemetry:            telemetrySink,
+		Mobile:               mc,
 		DevImport: devimportsvc.New(devimportsvc.Deps{
 			Store:         store,
 			TargetDataDir: cfg.DataDir,

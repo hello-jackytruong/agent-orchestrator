@@ -174,6 +174,7 @@ var shippedMigrations = map[int64]string{
 	168: "0168_cues.sql",
 	169: "0169_reported_pr_cdc.sql",
 	170: "0170_review_result_notifications.sql",
+	173: "0173_provider_accounts.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they
@@ -182,6 +183,7 @@ var shippedMigrations = map[int64]string{
 // new file claiming one would be skipped silently there.
 //
 //   - 22 shipped in a nightly (#2412) and was deleted by the revert.
+//   - 171/172 were applied by account-manager previews using a different schema.
 //
 // Beware of the adjacent hazard this cannot catch: at least one field profile
 // has versions 40 through 51 recorded as applied by a foreign build
@@ -189,7 +191,7 @@ var shippedMigrations = map[int64]string{
 // Any such migration whose schema the generated queries depend on must add a
 // schemaRepairs entry in db.go.
 func burnedVersion(v int64) bool {
-	return v == 22
+	return v == 22 || v == 171 || v == 172
 }
 
 // TestMigrationVersionLedger enforces the append-only migration ledger: every
