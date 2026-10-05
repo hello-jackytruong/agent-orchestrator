@@ -260,6 +260,12 @@ describe("normalizeApiOperation", () => {
 		expect(normalizeApiOperation("POST", "/api/v1/agents/codex/accounts/ensure")).toBe("POST /api/v1/agents/codex/accounts/ensure");
 		expect(normalizeApiOperation("DELETE", "/api/v1/agents/codex/accounts/private-account-id")).toBe("DELETE /api/v1/agents/codex/accounts/:id");
 	});
+
+	it("normalizes provider-account and session routes without exposing ids", () => {
+		expect(normalizeApiOperation("DELETE", "/api/v1/provider-accounts/account-42")).toBe("DELETE /api/v1/provider-accounts/:id");
+		expect(normalizeApiOperation("PUT", "/api/v1/provider-accounts/account-42/primary")).toBe("PUT /api/v1/provider-accounts/:id/primary");
+		expect(normalizeApiOperation("GET", "/api/v1/sessions/session-42/provider-account")).toBe("GET /api/v1/sessions/:id/provider-account");
+	});
 });
 
 describe("api error telemetry", () => {

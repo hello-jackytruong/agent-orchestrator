@@ -20,24 +20,30 @@ func Build(root string, port int, controlKey, inferenceKey string, routes *Route
 	if !filepath.IsAbs(root) || port < 1 || port > 65535 || len(controlKey) < 32 || len(inferenceKey) < 32 || controlKey == inferenceKey {
 		return nil, errors.New("invalid proxy host configuration")
 	}
-	cfg := &config.Config{Host: "127.0.0.1", Port: port, AuthDir: filepath.Join(root, "auth"), CommercialMode: true, MaxRetryCredentials: 1, WebsocketAuth: true}
+	path := filepath.Join(root, "config.yaml")
+	authDir := filepath.Join(root, "auth")
+	// The SDK checks for a configured secret before accepting its local password.
+	secret, err := bcrypt.GenerateFromPassword([]byte(controlKey), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	applyConfig := func(cfg *config.Config) {
+		cfg.Host, cfg.Port, cfg.AuthDir = "127.0.0.1", port, authDir
+		cfg.CommercialMode, cfg.MaxRetryCredentials, cfg.WebsocketAuth = true, 1, true
+		cfg.APIKeys = []string{inferenceKey}
+		cfg.Routing.Strategy = "fill-first"
+		cfg.RemoteManagement.DisableControlPanel = true
+		cfg.RemoteManagement.DisableAutoUpdatePanel = true
+		cfg.RemoteManagement.SecretKey = string(secret)
+	}
+	cfg := &config.Config{}
+	applyConfig(cfg)
 	if err := os.MkdirAll(cfg.AuthDir, 0700); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(cfg.AuthDir, 0700); err != nil {
 		return nil, err
 	}
-	cfg.APIKeys = []string{inferenceKey}
-	cfg.Routing.Strategy = "fill-first"
-	cfg.RemoteManagement.DisableControlPanel = true
-	cfg.RemoteManagement.DisableAutoUpdatePanel = true
-	// The SDK checks for a configured secret before accepting its local password.
-	secret, err := bcrypt.GenerateFromPassword([]byte(controlKey), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
-	}
-	cfg.RemoteManagement.SecretKey = string(secret)
-	path := filepath.Join(root, "config.yaml")
 	if _, statErr := os.Stat(path); statErr == nil {
 		stored, loadErr := config.LoadConfig(path)
 		if loadErr != nil && strings.Contains(loadErr.Error(), "credential-in-flight") {
@@ -59,36 +65,15 @@ func Build(root string, port int, controlKey, inferenceKey string, routes *Route
 			return nil, loadErr
 		}
 		cfg = stored
-		cfg.Host = "127.0.0.1"
-		cfg.Port = port
-		cfg.AuthDir = filepath.Join(root, "auth")
-		cfg.CommercialMode = true
-		cfg.MaxRetryCredentials = 1
-		cfg.WebsocketAuth = true
-		cfg.APIKeys = []string{inferenceKey}
-		cfg.Routing.Strategy = "fill-first"
-		cfg.RemoteManagement.DisableControlPanel = true
-		cfg.RemoteManagement.DisableAutoUpdatePanel = true
-		cfg.RemoteManagement.SecretKey = string(secret)
 	} else if errors.Is(statErr, os.ErrNotExist) {
 		cfg, err = config.LoadConfigOptional(path, true)
 		if err != nil {
 			return nil, err
 		}
-		cfg.Host = "127.0.0.1"
-		cfg.Port = port
-		cfg.AuthDir = filepath.Join(root, "auth")
-		cfg.CommercialMode = true
-		cfg.MaxRetryCredentials = 1
-		cfg.WebsocketAuth = true
-		cfg.APIKeys = []string{inferenceKey}
-		cfg.Routing.Strategy = "fill-first"
-		cfg.RemoteManagement.DisableControlPanel = true
-		cfg.RemoteManagement.DisableAutoUpdatePanel = true
-		cfg.RemoteManagement.SecretKey = string(secret)
 	} else {
 		return nil, statErr
 	}
+	applyConfig(cfg)
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return nil, err

@@ -64,10 +64,6 @@ const ROUTE_TEMPLATES = [
 	"/api/v1/provider-accounts/quota-auto-switch",
 	"/api/v1/provider-accounts/login",
 	"/api/v1/provider-accounts/login/{loginId}",
-	"/api/v1/provider-accounts/{accountId}",
-	"/api/v1/provider-accounts/{accountId}/primary",
-	"/api/v1/provider-accounts/{accountId}/sign-out",
-	"/api/v1/sessions/{sessionId}/provider-account",
 	"/api/v1/agents",
 	"/api/v1/agents/install-jobs",
 	"/api/v1/agents/auth-plans",
@@ -148,6 +144,7 @@ const ROUTE_TEMPLATES = [
 // telemetry for known collections even if a route is ever missed above.
 const RESOURCE_SEGMENTS = new Set([
 	"agents",
+	"provider-accounts",
 	"projects",
 	"sessions",
 	"notifications",
