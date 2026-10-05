@@ -3561,6 +3561,49 @@ paths:
       summary: Verify login and register its account
       tags:
       - agents
+  /api/v1/provider-accounts/quota-auto-switch:
+    patch:
+      operationId: setCodexQuotaAutoSwitch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCodexQuotaAutoSwitchRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderAccountsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Enable or disable automatic Codex quota primary switching
+      tags:
+      - agents
   /api/v1/prs/{id}/merge:
     post:
       operationId: mergePR
@@ -13120,11 +13163,50 @@ components:
         replacementPrimaryId:
           type: string
       type: object
+    ProviderAccountUsageView:
+      properties:
+        checkedAt:
+          format: date-time
+          type: string
+        message:
+          type: string
+        plan:
+          type: string
+        status:
+          enum:
+          - available
+          - unavailable
+          type: string
+        windows:
+          items:
+            $ref: '#/components/schemas/ProviderAccountUsageWindowView'
+          type: array
+      required:
+      - status
+      type: object
+    ProviderAccountUsageWindowView:
+      properties:
+        name:
+          type: string
+        remainingFraction:
+          format: double
+          type: number
+        resetTime:
+          type: string
+      required:
+      - remainingFraction
+      type: object
     ProviderAccountView:
       properties:
         email:
           type: string
         id:
+          type: string
+        kind:
+          enum:
+          - oauth
+          - imported
+          - api_key
           type: string
         primary:
           type: boolean
@@ -13139,6 +13221,8 @@ components:
           type: array
         signedIn:
           type: boolean
+        usage:
+          $ref: '#/components/schemas/ProviderAccountUsageView'
       required:
       - id
       - provider
@@ -13153,6 +13237,10 @@ components:
           items:
             $ref: '#/components/schemas/ProviderAccountView'
           type: array
+        codexQuotaAutoSwitch:
+          type: boolean
+        codexRequestSwitching:
+          type: boolean
         defaults:
           items:
             $ref: '#/components/schemas/ProviderPrimaryView'
@@ -13168,6 +13256,21 @@ components:
       properties:
         accountId:
           type: string
+        apiKey:
+          type: string
+        baseUrl:
+          type: string
+        credentialJson:
+          type: string
+        label:
+          type: string
+        mode:
+          enum:
+          - browser
+          - device
+          - import
+          - api_key
+          type: string
         provider:
           enum:
           - codex
@@ -13180,7 +13283,13 @@ components:
       properties:
         accountId:
           type: string
+        code:
+          type: string
+        expiresIn:
+          type: integer
         id:
+          type: string
+        mode:
           type: string
         provider:
           type: string
@@ -13196,7 +13305,6 @@ components:
       required:
       - id
       - provider
-      - url
       - status
       - accountId
       type: object
@@ -14999,6 +15107,15 @@ components:
           type:
           - "null"
           - string
+      type: object
+    UpdateCodexQuotaAutoSwitchRequest:
+      properties:
+        enabled:
+          type:
+          - "null"
+          - boolean
+      required:
+      - enabled
       type: object
     UpdateProjectSettingsInput:
       properties:

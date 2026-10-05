@@ -28,6 +28,12 @@ func NewLoginCoordinator(accounts *Service, proxy ports.ProviderAccountLoginProx
 
 // Start starts or resumes a provider login attempt.
 func (l *LoginCoordinator) Start(ctx context.Context, provider, accountID string) (ports.ProviderLogin, error) {
+	return l.StartRequest(ctx, provider, accountID, "browser", ports.ProviderLoginInput{})
+}
+
+// StartRequest starts one of the supported credential acquisition methods.
+// Browser login remains the default and keeps the original public contract.
+func (l *LoginCoordinator) StartRequest(ctx context.Context, provider, accountID, mode string, input ports.ProviderLoginInput) (ports.ProviderLogin, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if provider != "codex" && provider != "claude" {
@@ -40,7 +46,7 @@ func (l *LoginCoordinator) Start(ctx context.Context, provider, accountID string
 				return current, err
 			}
 			if current.Status == "waiting" {
-				if current.AccountID == accountID {
+				if current.AccountID == accountID && (current.Mode == mode || current.Mode == "" && mode == "browser") {
 					return current, nil
 				}
 				return ports.ProviderLogin{}, fmt.Errorf("a login is already in progress for this provider: %w", ports.ErrProviderAccountConflict)
@@ -63,13 +69,29 @@ func (l *LoginCoordinator) Start(ctx context.Context, provider, accountID string
 			return ports.ProviderLogin{}, fmt.Errorf("account is already signed in: %w", ports.ErrProviderAccountConflict)
 		}
 	}
-	login, err := l.proxy.StartAccountLogin(ctx, provider, l.newID())
+	loginID := l.newID()
+	var login ports.ProviderLogin
+	var err error
+	if mode == "" || mode == "browser" {
+		login, err = l.proxy.StartAccountLogin(ctx, provider, loginID)
+	} else if modes, ok := l.proxy.(ports.ProviderAccountLoginModes); ok {
+		login, err = modes.StartAccountLoginMode(ctx, provider, loginID, mode, input)
+	} else {
+		return ports.ProviderLogin{}, fmt.Errorf("login mode %q is unavailable: %w", mode, ports.ErrProviderAccountIncompatible)
+	}
 	if err != nil {
 		return login, err
 	}
 	login.AccountID = accountID
+	if login.Mode == "" {
+		login.Mode = mode
+	}
 	l.attempts[login.ID] = login
-	l.expires[login.ID] = l.now().Add(6 * time.Minute)
+	duration := 6 * time.Minute
+	if login.ExpiresIn > 0 && login.ExpiresIn <= 900 {
+		duration = time.Duration(login.ExpiresIn) * time.Second
+	}
+	l.expires[login.ID] = l.now().Add(duration)
 	return login, nil
 }
 
@@ -101,7 +123,7 @@ func (l *LoginCoordinator) status(ctx context.Context, id string) (ports.Provide
 			l.attempts[id] = login
 			return login, errors.Join(ports.ErrProviderAccountIncompatible, l.accounts.discardLogin(ctx, verified))
 		}
-		accountID, err := l.accounts.RecordLogin(ctx, verified.Provider, verified.Email, verified.CredentialRef, verified.AuthID, login.AccountID)
+		accountID, err := l.accounts.RecordCredential(ctx, verified, login.AccountID)
 		if err != nil {
 			if errors.Is(err, ports.ErrProviderAccountIncompatible) || errors.Is(err, ports.ErrProviderAccountConflict) || errors.Is(err, ports.ErrProviderAccountUnknown) {
 				login.Status = "failed"

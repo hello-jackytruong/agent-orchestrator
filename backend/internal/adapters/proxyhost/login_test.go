@@ -75,7 +75,7 @@ func TestProviderLoginRelayForwardsOnlyTheMatchingBrowserCallback(t *testing.T) 
 				}
 				switch r.URL.Path {
 				case "/ao/status":
-					return fakeResponse(200, `{"protocol_version":1}`), nil
+					return fakeResponse(200, `{"protocol_version":2}`), nil
 				case "/v8/management/oauth/auth-url":
 					if r.Method != http.MethodGet || r.URL.Query().Get("provider") != provider {
 						t.Errorf("wrong login request: %s %s", r.Method, r.URL)
@@ -191,7 +191,7 @@ func TestProviderLoginRelayReleasesPortWhenStartFails(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := privateClient(t, func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path == "/ao/status" {
-					return fakeResponse(200, `{"protocol_version":1}`), nil
+					return fakeResponse(200, `{"protocol_version":2}`), nil
 				}
 				if tc.transportError {
 					return nil, errors.New("connection lost")
@@ -220,7 +220,7 @@ func TestProviderLoginStatusClosesOnlyTerminalAttempts(t *testing.T) {
 				calls = append(calls, r.URL.Path)
 				switch r.URL.Path {
 				case "/ao/status":
-					return fakeResponse(200, `{"protocol_version":1}`), nil
+					return fakeResponse(200, `{"protocol_version":2}`), nil
 				case "/v8/management/oauth/auth-url":
 					return fakeResponse(200, `{"state":"a&b=?","url":"https://provider.test/login"}`), nil
 				case "/v8/management/oauth/status":
@@ -281,7 +281,7 @@ func TestProviderLoginCancellationClosesLocalRelayEvenIfUpstreamFails(t *testing
 			c := privateClient(t, func(r *http.Request) (*http.Response, error) {
 				switch r.URL.Path {
 				case "/ao/status":
-					return fakeResponse(200, `{"protocol_version":1}`), nil
+					return fakeResponse(200, `{"protocol_version":2}`), nil
 				case "/v8/management/oauth/auth-url":
 					return fakeResponse(200, `{"state":"a&b","url":"https://provider.test/login"}`), nil
 				case "/v8/management/oauth/session":
@@ -318,7 +318,7 @@ func TestProviderLoginCallbackProviderErrorIsForwardedWithoutEcho(t *testing.T) 
 	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/ao/status":
-			return fakeResponse(200, `{"protocol_version":1}`), nil
+			return fakeResponse(200, `{"protocol_version":2}`), nil
 		case "/v8/management/oauth/auth-url":
 			return fakeResponse(200, `{"state":"state","url":"https://provider.test/login"}`), nil
 		case "/v8/management/oauth/callback":

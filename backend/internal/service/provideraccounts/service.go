@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -17,18 +19,178 @@ import (
 
 // Service owns managed provider defaults, session assignments, and mutation recovery.
 type Service struct {
-	store     ports.ProviderAccountStore
-	proxy     ports.ProviderAccountProxy
-	guard     ports.ProviderAccountSessionGuard
-	gate      chan struct{}
-	ticketKey []byte
-	endpoint  string
-	newID     func() string
+	store                 ports.ProviderAccountStore
+	proxy                 ports.ProviderAccountProxy
+	guard                 ports.ProviderAccountSessionGuard
+	codexRequestSwitching bool
+	gate                  chan struct{}
+	ticketKey             []byte
+	endpoint              string
+	newID                 func() string
+	usageMu               sync.Mutex
+	usageCache            map[string]cachedUsage
+}
+
+type cachedUsage struct {
+	value     domain.ProviderAccountUsage
+	expiresAt time.Time
+}
+
+const providerUsageCacheTTL = 2 * time.Minute
+
+// EnableCodexRequestSwitching is a startup-only opt-in pending live continuity verification.
+func (s *Service) EnableCodexRequestSwitching() { s.codexRequestSwitching = true }
+func (s *Service) CodexRequestSwitching() bool  { return s.codexRequestSwitching }
+
+// CodexQuotaAutoSwitch reports whether confirmed Codex quota exhaustion may
+// move the current primary to another signed-in account.
+func (s *Service) CodexQuotaAutoSwitch(ctx context.Context) (bool, error) {
+	state, err := s.State(ctx)
+	return state.CodexQuotaAutoSwitch && signedInCount(state, "codex") >= 2, err
+}
+
+// SetCodexQuotaAutoSwitch persists the user's quota recovery preference.
+func (s *Service) SetCodexQuotaAutoSwitch(ctx context.Context, enabled bool) error {
+	return s.mutate(ctx, func(state *domain.ProviderAccountState) (string, error) {
+		if enabled && signedInCount(*state, "codex") < 2 {
+			return "", ports.ErrProviderQuotaSwitchRequiresReplacement
+		}
+		state.CodexQuotaAutoSwitch = enabled
+		return "", nil
+	})
+}
+
+var errQuotaEventStale = errors.New("quota event is stale")
+var errQuotaReplacementUnavailable = errors.New("no signed-in replacement account is available")
+
+// ProcessCodexQuotaEvents applies confirmed quota events to the current
+// primary. It deliberately changes only the primary and routes that currently
+// use it; sessions on other accounts are untouched.
+func (s *Service) ProcessCodexQuotaEvents(ctx context.Context) error {
+	quotaProxy, ok := s.proxy.(ports.ProviderQuotaEvents)
+	if !ok {
+		return nil
+	}
+	events, err := quotaProxy.QuotaEvents(ctx)
+	if err != nil {
+		return err
+	}
+	state, err := s.State(ctx)
+	if err != nil || !state.CodexQuotaAutoSwitch || signedInCount(state, "codex") < 2 {
+		return err
+	}
+	var acknowledged []string
+	for _, event := range events {
+		if event.AuthID == "" {
+			acknowledged = append(acknowledged, event.ID)
+			continue
+		}
+		if event.ResetAt > 0 && event.ResetAt <= time.Now().Unix() {
+			acknowledged = append(acknowledged, event.ID)
+			continue
+		}
+		if err := s.switchPrimaryForQuota(ctx, event); err != nil {
+			if errors.Is(err, errQuotaEventStale) {
+				acknowledged = append(acknowledged, event.ID)
+			}
+			continue
+		}
+		acknowledged = append(acknowledged, event.ID)
+		// Apply at most one switch per poll. Other events were observed against
+		// the previous primary generation and must be re-evaluated next time.
+		break
+	}
+	return quotaProxy.AckQuotaEvents(ctx, acknowledged)
+}
+
+func (s *Service) switchPrimaryForQuota(ctx context.Context, event ports.ProviderQuotaEvent) error {
+	return s.mutateWithBoundary(ctx, true, func(state *domain.ProviderAccountState) (string, error) {
+		currentGeneration := state.CodexPrimaryGeneration
+		if currentGeneration == 0 {
+			if current, exists := primary(*state, "codex"); exists && current != "" {
+				currentGeneration = 1
+			}
+		}
+		if event.Generation > 0 && currentGeneration != event.Generation {
+			return "", errQuotaEventStale
+		}
+		current, ok := primary(*state, "codex")
+		if !ok || current == "" {
+			return "", errQuotaEventStale
+		}
+		accountUsingEvent, ok := account(*state, current)
+		if !ok || accountUsingEvent.AuthID != event.AuthID {
+			return "", errQuotaEventStale
+		}
+		replacement := ""
+		for _, candidate := range state.Accounts {
+			if candidate.Provider != "codex" || candidate.ID == current || candidate.CredentialRef == "" || candidate.AuthID == "" {
+				continue
+			}
+			replacement = candidate.ID
+			break
+		}
+		if replacement == "" {
+			return "", errQuotaReplacementUnavailable
+		}
+		for i, route := range state.Routes {
+			if route.Provider == "codex" && route.AccountID == current {
+				state.Routes[i].AccountID = replacement
+			}
+		}
+		setPrimary(state, "codex", replacement)
+		return "", nil
+	})
 }
 
 // New creates the account service with a stable private ticket identity.
 func New(store ports.ProviderAccountStore, proxy ports.ProviderAccountProxy, guard ports.ProviderAccountSessionGuard, key []byte, endpoint string, newID func() string) *Service {
-	return &Service{store: store, proxy: proxy, guard: guard, gate: make(chan struct{}, 1), ticketKey: append([]byte(nil), key...), endpoint: endpoint, newID: newID}
+	return &Service{store: store, proxy: proxy, guard: guard, gate: make(chan struct{}, 1), ticketKey: append([]byte(nil), key...), endpoint: endpoint, newID: newID, usageCache: make(map[string]cachedUsage)}
+}
+
+// AccountUsages returns safe, best-effort quota summaries for signed-in
+// accounts. Account inventory remains usable when a provider cannot report
+// usage, so each failed lookup becomes an explicit unavailable state.
+func (s *Service) AccountUsages(ctx context.Context, accounts []domain.ProviderAccount) map[string]domain.ProviderAccountUsage {
+	result := make(map[string]domain.ProviderAccountUsage)
+	proxy, ok := s.proxy.(ports.ProviderAccountUsageProxy)
+	if !ok {
+		for _, account := range accounts {
+			if account.CredentialRef != "" && account.AuthID != "" {
+				result[account.ID] = domain.ProviderAccountUsage{Status: "unavailable", Message: "Usage unavailable", CheckedAt: time.Now().UTC()}
+			}
+		}
+		return result
+	}
+	now := time.Now()
+	for _, account := range accounts {
+		if account.CredentialRef == "" || account.AuthID == "" {
+			continue
+		}
+		key := account.ID + "\x00" + account.AuthID
+		s.usageMu.Lock()
+		cached, found := s.usageCache[key]
+		s.usageMu.Unlock()
+		if found && now.Before(cached.expiresAt) {
+			result[account.ID] = cached.value
+			continue
+		}
+		usage, err := proxy.FetchAccountUsage(ctx, account.Provider, account.AuthID, account.CredentialRef)
+		if err != nil {
+			usage = domain.ProviderAccountUsage{Status: "unavailable", Message: "Usage unavailable", CheckedAt: now.UTC()}
+		}
+		if usage.Status == "" {
+			usage.Status = "available"
+		}
+		if usage.CheckedAt.IsZero() {
+			usage.CheckedAt = now.UTC()
+		}
+		s.usageMu.Lock()
+		s.usageCache[key] = cachedUsage{value: usage, expiresAt: now.Add(providerUsageCacheTTL)}
+		s.usageMu.Unlock()
+		result[account.ID] = usage
+	}
+	return result
 }
 
 // Provider maps supported harnesses to their account provider.
@@ -66,6 +228,15 @@ func account(state domain.ProviderAccountState, id string) (domain.ProviderAccou
 	}
 	return domain.ProviderAccount{}, false
 }
+func signedInCount(state domain.ProviderAccountState, provider string) int {
+	count := 0
+	for _, a := range state.Accounts {
+		if a.Provider == provider && a.CredentialRef != "" && a.AuthID != "" {
+			count++
+		}
+	}
+	return count
+}
 func primary(state domain.ProviderAccountState, provider string) (string, bool) {
 	for _, p := range state.Primaries {
 		if p.Provider == provider {
@@ -75,6 +246,10 @@ func primary(state domain.ProviderAccountState, provider string) (string, bool) 
 	return "", false
 }
 func setPrimary(state *domain.ProviderAccountState, provider, id string) {
+	previous, _ := primary(*state, provider)
+	if provider == "codex" && previous != id {
+		state.CodexPrimaryGeneration++
+	}
 	for i, p := range state.Primaries {
 		if p.Provider == provider {
 			state.Primaries[i].PrimaryID = id
@@ -167,7 +342,18 @@ func (s *Service) LaunchAccountEnv(ctx context.Context, id domain.SessionID) (ma
 	return map[string]string{"AO_PROXY_ENDPOINT": "", "AO_PROXY_TICKET": "", "ANTHROPIC_BASE_URL": s.endpoint, "ANTHROPIC_AUTH_TOKEN": ticket, "ANTHROPIC_API_KEY": "", "CLAUDE_CODE_OAUTH_TOKEN": "", "CLAUDE_CODE_USE_BEDROCK": "", "CLAUDE_CODE_USE_VERTEX": "", "CLAUDE_CODE_USE_FOUNDRY": ""}, nil
 }
 func snapshot(state domain.ProviderAccountState) ports.ProviderRouteSnapshot {
-	result := ports.ProviderRouteSnapshot{Revision: state.Revision, Routes: make([]ports.ProviderRoute, 0, len(state.Routes))}
+	generation := state.CodexPrimaryGeneration
+	if generation == 0 {
+		if current, exists := primary(state, "codex"); exists && current != "" {
+			generation = 1
+		}
+	}
+	result := ports.ProviderRouteSnapshot{Revision: state.Revision, CodexPrimaryGeneration: generation, Routes: make([]ports.ProviderRoute, 0, len(state.Routes))}
+	for _, a := range state.Accounts {
+		if a.CredentialRef != "" && a.AuthID != "" {
+			result.AuthIDs = append(result.AuthIDs, a.AuthID)
+		}
+	}
 	for _, r := range state.Routes {
 		authID := ""
 		if a, ok := account(state, r.AccountID); ok {
@@ -186,7 +372,7 @@ func (s *Service) reconcile(ctx context.Context, guarded bool) error {
 		return ports.ErrProviderAccountRecovery
 	}
 	if !guarded && state.Revision != pending.Next.Revision {
-		affected := changedSessions(snapshot(state), snapshot(pending.Next))
+		affected := mutationSessions(snapshot(state), snapshot(pending.Next), pending.RequestBoundary)
 		if len(affected) > 0 {
 			if s.guard == nil {
 				return ports.ErrProviderAccountBusy
@@ -198,7 +384,9 @@ func (s *Service) reconcile(ctx context.Context, guarded bool) error {
 			defer done()
 		}
 	}
-	if err = s.proxy.ApplyRoutes(ctx, snapshot(pending.Next)); err != nil {
+	next := snapshot(pending.Next)
+	next.RequestBoundary = pending.RequestBoundary
+	if err = s.proxy.ApplyRoutes(ctx, next); err != nil {
 		// A helper admission refusal proves that it changed no routes. Clear
 		// this uncommitted intent so an idle retry requires a new user action.
 		// Failed cleanup leaves the operation unresolved, not safely cancelled.
@@ -251,6 +439,10 @@ func (s *Service) RestoreHost(ctx context.Context) error {
 }
 
 func (s *Service) mutate(ctx context.Context, change func(*domain.ProviderAccountState) (string, error)) error {
+	return s.mutateWithBoundary(ctx, false, change)
+}
+
+func (s *Service) mutateWithBoundary(ctx context.Context, requestBoundary bool, change func(*domain.ProviderAccountState) (string, error)) error {
 	release, err := s.lock(ctx)
 	if err != nil {
 		return err
@@ -270,7 +462,8 @@ func (s *Service) mutate(ctx context.Context, change func(*domain.ProviderAccoun
 		return err
 	}
 	after := snapshot(state)
-	affected := changedSessions(before, after)
+	requestBoundary = requestBoundary || (s.codexRequestSwitching && deletion == "")
+	affected := mutationSessions(before, after, requestBoundary)
 	if len(affected) > 0 {
 		if s.guard == nil {
 			return ports.ErrProviderAccountBusy
@@ -282,7 +475,7 @@ func (s *Service) mutate(ctx context.Context, change func(*domain.ProviderAccoun
 		defer done()
 	}
 	state.Revision++
-	if err := s.store.SaveProviderAccountIntent(ctx, oldRevision, domain.ProviderAccountIntent{Next: state, DeleteCredential: deletion}); err != nil {
+	if err := s.store.SaveProviderAccountIntent(ctx, oldRevision, domain.ProviderAccountIntent{Next: state, DeleteCredential: deletion, RequestBoundary: requestBoundary}); err != nil {
 		return err
 	}
 	return s.reconcile(ctx, true)
@@ -290,8 +483,24 @@ func (s *Service) mutate(ctx context.Context, change func(*domain.ProviderAccoun
 
 // RecordLogin accepts only an inventory-verified successful upstream login.
 func (s *Service) RecordLogin(ctx context.Context, provider, email, credentialRef, authID, reloginID string) (string, error) {
-	if (provider != "codex" && provider != "claude") || strings.TrimSpace(email) == "" || credentialRef == "" || authID == "" || filepath.Base(credentialRef) != credentialRef || strings.ContainsAny(credentialRef, "/\\") || credentialRef == "." || credentialRef == ".." {
+	return s.RecordCredential(ctx, ports.VerifiedProviderLogin{Provider: provider, Email: email, CredentialRef: credentialRef, AuthID: authID}, reloginID)
+}
+
+// RecordCredential accepts an inventory-verified OAuth, imported, or API-key
+// credential. API-key references are opaque helper-owned values and therefore
+// are allowed to use the config: namespace.
+func (s *Service) RecordCredential(ctx context.Context, verified ports.VerifiedProviderLogin, reloginID string) (string, error) {
+	provider, email, credentialRef, authID := verified.Provider, verified.Email, verified.CredentialRef, verified.AuthID
+	validRef := filepath.Base(credentialRef) == credentialRef && !strings.ContainsAny(credentialRef, "/\\") && credentialRef != "." && credentialRef != ".."
+	if strings.HasPrefix(credentialRef, "config:") {
+		validRef = len(credentialRef) > len("config:") && !strings.ContainsAny(credentialRef, "/\\")
+	}
+	if (provider != "codex" && provider != "claude") || strings.TrimSpace(email) == "" || credentialRef == "" || authID == "" || !validRef {
 		return "", fmt.Errorf("invalid verified provider account: %w", ports.ErrProviderAccountIncompatible)
+	}
+	kind := strings.TrimSpace(verified.Kind)
+	if kind == "" {
+		kind = "oauth"
 	}
 	id := reloginID
 	if id == "" {
@@ -310,7 +519,7 @@ func (s *Service) RecordLogin(ctx context.Context, provider, email, credentialRe
 			}
 			for i, a := range state.Accounts {
 				if a.ID == id {
-					state.Accounts[i] = domain.ProviderAccount{ID: id, Provider: provider, Email: email, CredentialRef: credentialRef, AuthID: authID}
+					state.Accounts[i] = domain.ProviderAccount{ID: id, Provider: provider, Email: email, Kind: kind, CredentialRef: credentialRef, AuthID: authID}
 				}
 			}
 		} else {
@@ -326,7 +535,7 @@ func (s *Service) RecordLogin(ctx context.Context, provider, email, credentialRe
 					return "", fmt.Errorf("account already exists; sign in to its existing entry: %w", ports.ErrProviderAccountConflict)
 				}
 			}
-			state.Accounts = append(state.Accounts, domain.ProviderAccount{ID: id, Provider: provider, Email: email, CredentialRef: credentialRef, AuthID: authID})
+			state.Accounts = append(state.Accounts, domain.ProviderAccount{ID: id, Provider: provider, Email: email, Kind: kind, CredentialRef: credentialRef, AuthID: authID})
 		}
 		current, _ := primary(*state, provider)
 		if current == "" {
@@ -342,7 +551,7 @@ func (s *Service) RecordLogin(ctx context.Context, provider, email, credentialRe
 	return id, err
 }
 
-// SetPrimary changes the default for future sessions of an account provider.
+// SetPrimary changes the default and optionally rebinds previous-primary Codex routes.
 func (s *Service) SetPrimary(ctx context.Context, id string) error {
 	return s.mutate(ctx, func(state *domain.ProviderAccountState) (string, error) {
 		a, ok := account(*state, id)
@@ -351,6 +560,14 @@ func (s *Service) SetPrimary(ctx context.Context, id string) error {
 		}
 		if err := eligible(*state, id, a.Provider); err != nil {
 			return "", err
+		}
+		if s.codexRequestSwitching && a.Provider == "codex" {
+			previous, _ := primary(*state, a.Provider)
+			for i, r := range state.Routes {
+				if r.Provider == a.Provider && r.AccountID == previous {
+					state.Routes[i].AccountID = id
+				}
+			}
 		}
 		setPrimary(state, a.Provider, id)
 		return "", nil
@@ -378,7 +595,7 @@ func (s *Service) AssignAccount(ctx context.Context, id domain.SessionID, harnes
 	})
 }
 
-// Switch changes an idle managed session account while retaining its ticket.
+// Switch retains the ticket; opt-in Codex rebinds apply at the next request.
 func (s *Service) Switch(ctx context.Context, id domain.SessionID, target string) error {
 	return s.mutate(ctx, func(state *domain.ProviderAccountState) (string, error) {
 		for i, r := range state.Routes {
@@ -439,6 +656,9 @@ func (s *Service) Remove(ctx context.Context, id, replacement string, signOut bo
 			accounts = append(accounts, entry)
 		}
 		state.Accounts = accounts
+		if a.Provider == "codex" && signedInCount(*state, "codex") < 2 {
+			state.CodexQuotaAutoSwitch = false
+		}
 		return a.CredentialRef, nil
 	})
 }
@@ -461,6 +681,21 @@ func changedSessions(before, after ports.ProviderRouteSnapshot) []domain.Session
 		}
 	}
 	return affected
+}
+
+// Only a non-revoking Codex rebind may skip native idle admission. Destructive
+// mutations still fence workers/reviewers; the helper separately drains auth leases.
+func mutationSessions(before, after ports.ProviderRouteSnapshot, requestBoundary bool) []domain.SessionID {
+	if requestBoundary {
+		for i, old := range before.Routes {
+			for _, next := range after.Routes {
+				if old.SessionID == next.SessionID && old.Provider == "codex" && next.Provider == old.Provider && next.TicketHash == old.TicketHash && next.AuthID != "" {
+					before.Routes[i].AuthID = next.AuthID
+				}
+			}
+		}
+	}
+	return changedSessions(before, after)
 }
 
 // RecoveryRequired reports whether a durable account operation remains unfinished.

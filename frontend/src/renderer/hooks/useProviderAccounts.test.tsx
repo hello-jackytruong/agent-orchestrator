@@ -83,14 +83,14 @@ describe("browser login API", () => {
 	it("starts a new login with no presumed native credential import", async () => {
 		const login = { id: "attempt", provider: "codex", url: "https://provider.test/login", status: "waiting", accountId: "" };
 		api.post.mockResolvedValue({ data: login });
-		expect(await startProviderLogin("codex")).toBe(login);
-		expect(api.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex", accountId: undefined } });
+		expect(await startProviderLogin({ provider: "codex" })).toBe(login);
+		expect(api.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex" } });
 		expect(api.get).not.toHaveBeenCalled();
 	});
 	it("re-signs into the chosen retained account identity", async () => {
 		const login = { id: "attempt", provider: "claude", url: "https://provider.test/login", status: "waiting", accountId: "retained" };
 		api.post.mockResolvedValue({ data: login });
-		expect(await startProviderLogin("claude", "retained")).toBe(login);
+		expect(await startProviderLogin({ provider: "claude", accountId: "retained" })).toBe(login);
 		expect(api.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "claude", accountId: "retained" } });
 	});
 	it("polls the exact attempt without a raw OAuth state", async () => {
@@ -109,7 +109,7 @@ describe("browser login API", () => {
 	});
 	it("preserves callback-port errors on start", async () => {
 		api.post.mockResolvedValue({ error: { message: "Login callback port is in use" } });
-		await expect(startProviderLogin("codex")).rejects.toThrow("Login callback port is in use");
+		await expect(startProviderLogin({ provider: "codex" })).rejects.toThrow("Login callback port is in use");
 		expect(api.post).toHaveBeenCalledTimes(1);
 	});
 	it("preserves an unknown-attempt error so the UI can ask for sign-in again", async () => {

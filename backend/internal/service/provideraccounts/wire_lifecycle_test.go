@@ -51,13 +51,14 @@ func (p *accountWirePeer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method + " " + r.URL.Path {
 	case "GET /ao/status":
-		_, _ = io.WriteString(w, `{"protocol_version":1}`)
+		_, _ = io.WriteString(w, `{"protocol_version":2}`)
 	case "PUT /ao/routes":
 		var next ports.ProviderRouteSnapshot
 		if err := json.NewDecoder(r.Body).Decode(&next); err != nil {
 			http.Error(w, "bad routing body", http.StatusBadRequest)
 			return
 		}
+		next.RequestBoundary = false
 		if p.busy {
 			w.WriteHeader(http.StatusConflict)
 			_, _ = io.WriteString(w, `{"code":"SESSION_BUSY"}`)

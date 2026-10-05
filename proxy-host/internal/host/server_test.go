@@ -152,6 +152,29 @@ func TestBoundaryManagementAllowlist(t *testing.T) {
 		})
 	}
 }
+
+func TestBoundaryLegacyQuotaFetchIsPrivateAndOnlyReadOperationAllowed(t *testing.T) {
+	engine, _ := boundaryRouter(t)
+	engine.Any("/v0/management/*path", func(c *gin.Context) { c.Status(http.StatusOK) })
+	for _, token := range []string{"", "codex-ticket", "claude-ticket", strings.Repeat("i", 32)} {
+		response := boundaryRequest(engine, http.MethodPost, "/v0/management/quota/fetch", token, "{}", nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("non-management token admitted quota fetch: %d", response.Code)
+		}
+	}
+	control := strings.Repeat("c", 32)
+	if response := boundaryRequest(engine, http.MethodPost, "/v0/management/quota/fetch", control, "{}", nil); response.Code != http.StatusOK {
+		t.Fatalf("private quota fetch status=%d", response.Code)
+	}
+	for _, path := range []string{"/v0/management/config", "/v0/management/quota/reset", "/v0/management/api-call", "/v8/management/quota/fetch"} {
+		if response := boundaryRequest(engine, http.MethodPost, path, control, "{}", nil); response.Code != http.StatusNotFound {
+			t.Fatalf("unexpected management path allowed: %s status=%d", path, response.Code)
+		}
+	}
+	if response := boundaryRequest(engine, http.MethodGet, "/v0/management/quota/fetch", control, "", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("unexpected quota method allowed: %d", response.Code)
+	}
+}
 func TestBoundaryDisablesAllInterfaceOAuthForwarder(t *testing.T) {
 	engine, _ := boundaryRouter(t)
 	w := boundaryRequest(engine, "GET", "/v8/management/oauth/auth-url?provider=codex&is_webui=true", strings.Repeat("c", 32), "", nil)

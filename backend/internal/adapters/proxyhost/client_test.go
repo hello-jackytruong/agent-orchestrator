@@ -122,7 +122,7 @@ func TestProviderHostHealthyReuseDoesNotSpawnOrChangePID(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("c", 64) {
 			t.Fatal("probe omitted private control key")
 		}
-		return fakeResponse(200, `{"protocol_version":1,"revision":9,"routes":[]}`), nil
+		return fakeResponse(200, `{"protocol_version":2,"revision":9,"routes":[]}`), nil
 	})
 	c.state.PID = 6789
 	for i := 0; i < 3; i++ {
@@ -135,7 +135,7 @@ func TestProviderHostHealthyReuseDoesNotSpawnOrChangePID(t *testing.T) {
 	}
 }
 func TestProviderHostIncompatibleProtocolNeverStartsReplacement(t *testing.T) {
-	for _, body := range []string{`{"protocol_version":0}`, `{"protocol_version":2}`, `{"revision":0,"routes":[]}`} {
+	for _, body := range []string{`{"protocol_version":0}`, `{"protocol_version":1}`, `{"protocol_version":3}`, `{"revision":0,"routes":[]}`} {
 		t.Run(body, func(t *testing.T) {
 			c := privateClient(t, func(*http.Request) (*http.Response, error) { return fakeResponse(200, body), nil })
 			c.binary = "/binary-that-must-never-run"
@@ -188,7 +188,7 @@ func TestProviderHostRouteAcknowledgementMustBeExact(t *testing.T) {
 			puts := 0
 			c := privateClient(t, func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path == "/ao/status" {
-					return fakeResponse(200, `{"protocol_version":1}`), nil
+					return fakeResponse(200, `{"protocol_version":2}`), nil
 				}
 				puts++
 				if r.Method != http.MethodPut || r.URL.Path != "/ao/routes" {
@@ -210,12 +210,117 @@ func TestProviderHostRouteAcknowledgementMustBeExact(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderHostQuotaEventsReadAndAcknowledge(t *testing.T) {
+	var acknowledged []string
+	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/ao/status" {
+			return fakeResponse(200, `{"protocol_version":2}`), nil
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/ao/quota-events" {
+			return fakeResponse(200, `{"events":[{"id":"event-a","auth_id":"auth-a","reset_at":1700000000}]}`), nil
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/ao/quota-events/ack" {
+			var body struct {
+				IDs []string `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			acknowledged = body.IDs
+			return fakeResponse(200, `{"events":[]}`), nil
+		}
+		t.Fatalf("unexpected quota request %s %s", r.Method, r.URL)
+		return nil, nil
+	})
+	events, err := c.QuotaEvents(context.Background())
+	if err != nil || len(events) != 1 || events[0].AuthID != "auth-a" {
+		t.Fatalf("events=%+v err=%v", events, err)
+	}
+	if err := c.AckQuotaEvents(context.Background(), []string{"event-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(acknowledged, []string{"event-a"}) {
+		t.Fatalf("acknowledged=%v", acknowledged)
+	}
+}
+
+func TestProviderHostFetchAccountUsageUsesNativeCodexProbe(t *testing.T) {
+	var sawUsage bool
+	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/ao/status" {
+			return fakeResponse(http.StatusOK, `{"protocol_version":2}`), nil
+		}
+		if r.URL.Path == "/ao/account-usage" {
+			sawUsage = true
+			var body struct {
+				AuthID   string `json:"auth_id"`
+				Provider string `json:"provider"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.AuthID != "auth-1" || body.Provider != "codex" {
+				t.Fatalf("quota request=%v", body)
+			}
+			return fakeResponse(http.StatusOK, `{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":300,"reset_at":1893456000},"secondary_window":{"used_percent":100,"limit_window_seconds":10080,"reset_after_seconds":60}}}`), nil
+		}
+		t.Fatalf("unexpected request=%s %s", r.Method, r.URL)
+		return nil, nil
+	})
+	usage, err := c.FetchAccountUsage(context.Background(), "codex", "auth-1", "private.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sawUsage || usage.Status != "available" || usage.Plan != "pro" || len(usage.Windows) != 2 {
+		t.Fatalf("usage=%+v probe=%t", usage, sawUsage)
+	}
+	if usage.Windows[0].RemainingFraction != .75 || usage.Windows[1].RemainingFraction != 0 {
+		t.Fatalf("usage windows were not normalized=%+v", usage.Windows)
+	}
+}
+
+func TestProviderHostFetchClaudeUsageUsesNativeProbe(t *testing.T) {
+	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/ao/status" {
+			return fakeResponse(http.StatusOK, `{"protocol_version":2}`), nil
+		}
+		if r.URL.Path != "/ao/account-usage" {
+			t.Fatalf("unexpected request=%s %s", r.Method, r.URL)
+		}
+		return fakeResponse(http.StatusOK, `{"five_hour":{"utilization":25,"resets_at":"2030-01-01T00:00:00Z"},"seven_day":{"utilization":90,"resets_at":"2030-01-02T00:00:00Z"}}`), nil
+	})
+	usage, err := c.FetchAccountUsage(context.Background(), "claude", "auth-1", "private.json")
+	if err != nil || usage.Status != "available" || len(usage.Windows) != 2 || usage.Windows[0].RemainingFraction != .75 {
+		t.Fatalf("usage=%+v err=%v", usage, err)
+	}
+}
+
+func TestProviderHostFetchAccountUsageRejectsUnsupportedProvider(t *testing.T) {
+	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatal("unsupported provider should not contact helper")
+		return nil, nil
+	})
+	if _, err := c.FetchAccountUsage(context.Background(), "gemini", "auth-1", "private.json"); err == nil {
+		t.Fatal("unsupported provider accepted")
+	}
+}
+
+func TestProviderHostFetchAccountUsageRequiresSignedInIdentity(t *testing.T) {
+	c := privateClient(t, func(*http.Request) (*http.Response, error) {
+		t.Fatal("unsigned account should not contact helper")
+		return nil, nil
+	})
+	if _, err := c.FetchAccountUsage(context.Background(), "codex", "", "private.json"); err == nil {
+		t.Fatal("missing auth identity accepted")
+	}
+}
 func TestProviderHostDeletingCredentialEscapesExactlyOneName(t *testing.T) {
 	name := "alice+work?all=true&name=other.json"
 	deletes := 0
 	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/ao/status" {
-			return fakeResponse(200, `{"protocol_version":1}`), nil
+			return fakeResponse(200, `{"protocol_version":2}`), nil
 		}
 		deletes++
 		if r.Method != http.MethodDelete || r.URL.Query().Get("name") != name || len(r.URL.Query()) != 1 {
@@ -245,7 +350,7 @@ func TestProviderHostDeleteReplayRequiresVerifiedAbsence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := privateClient(t, func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path == "/ao/status" {
-					return fakeResponse(200, `{"protocol_version":1}`), nil
+					return fakeResponse(200, `{"protocol_version":2}`), nil
 				}
 				if r.Method == http.MethodDelete {
 					return fakeResponse(404, `{"error":"not found"}`), nil
@@ -297,6 +402,42 @@ func TestProviderHostMissingIdentityDoesNotReplaceEstablishedHelper(t *testing.T
 			after, err := os.ReadFile(path)
 			if err != nil || string(after) != string(original) {
 				t.Fatal("existing helper state was modified")
+			}
+		})
+	}
+}
+
+func TestRequestBoundaryAcknowledgementIncludesExactAccountInventory(t *testing.T) {
+	request := ports.ProviderRouteSnapshot{Revision: 9, AuthIDs: []string{"a", "b"}, RequestBoundary: true,
+		Routes: []ports.ProviderRoute{{SessionID: "s", Provider: "codex", TicketHash: "hash", AuthID: "b"}}}
+	for _, tc := range []struct {
+		name    string
+		ids     []string
+		wantErr bool
+	}{{"exact", []string{"a", "b"}, false}, {"missing", nil, true}, {"retired-active-account", []string{"b"}, true}, {"different-account", []string{"c", "b"}, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/ao/status" {
+					return fakeResponse(200, `{"protocol_version":2}`), nil
+				}
+				var sent ports.ProviderRouteSnapshot
+				if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(sent, request) {
+					t.Fatal("transport lost routing instruction or inventory")
+				}
+				ack := sent
+				ack.RequestBoundary = false
+				ack.AuthIDs = tc.ids
+				body, err := json.Marshal(ack)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return fakeResponse(200, string(body)), nil
+			})
+			if err := c.ApplyRoutes(context.Background(), request); (err != nil) != tc.wantErr {
+				t.Fatalf("ack error=%v wantErr=%v", err, tc.wantErr)
 			}
 		})
 	}

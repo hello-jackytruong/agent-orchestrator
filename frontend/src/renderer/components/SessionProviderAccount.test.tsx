@@ -147,3 +147,30 @@ describe("session provider account", () => {
 		expect(select).toHaveValue("b");
 	});
 });
+
+describe("experimental Codex request switching", () => {
+ it.each([false, true])("shows the actual admission rule when enabled=%s", async enabled => {
+  inventory.codexRequestSwitching = enabled;
+  renderSession();
+  await screen.findByRole("combobox", { name: "Session account" });
+  expect(await screen.findByText(enabled ? "Changes apply to the next API request. Requests already running keep their account." : "Changes apply when this session is idle.")).toBeInTheDocument();
+ });
+ it("keeps Claude idle wording when the Codex experiment is enabled", async () => {
+  inventory.codexRequestSwitching = true;
+  route.provider = "claude"; route.accountId = "c";
+  renderSession();
+  await screen.findByRole("combobox", { name: "Session account" });
+  expect(await screen.findByText("Changes apply when this session is idle.")).toBeInTheDocument();
+  expect(screen.queryByText(/Changes apply to the next API request/)).toBeNull();
+ });
+ it("accepts a live account switch without a restart or secondary operation", async () => {
+  inventory.codexRequestSwitching = true;
+  const user = userEvent.setup();
+  renderSession();
+  await user.selectOptions(await screen.findByRole("combobox", { name: "Session account" }), "b");
+  expect(await screen.findByRole("status")).toHaveTextContent("Session account changed.");
+  expect(screen.getByRole("combobox", { name: "Session account" })).toHaveValue("b");
+  expect(mock.put).toHaveBeenCalledTimes(1);
+  expect(mock.put).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/provider-account", { params: { path: { sessionId: "session-one" } }, body: { accountId: "b" } });
+ });
+});

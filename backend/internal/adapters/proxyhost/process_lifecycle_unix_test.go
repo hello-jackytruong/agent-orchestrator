@@ -74,9 +74,9 @@ func TestProviderHostProcessFixture(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/ao/status":
-			protocol := 1
+			protocol := 2
 			if mode == "incompatible" {
-				protocol = 2
+				protocol = 3
 			}
 			_ = json.NewEncoder(w).Encode(map[string]int{"protocol_version": protocol})
 		case "/ao/routes":

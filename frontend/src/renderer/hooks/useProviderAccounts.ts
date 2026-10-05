@@ -15,7 +15,12 @@ export async function fetchProviderAccounts(): Promise<ProviderAccounts> {
 	return data!;
 }
 export function useProviderAccounts(enabled = true) {
-	return useQuery({ queryKey: providerAccountsKey, queryFn: fetchProviderAccounts, enabled, refetchInterval: 5000, retry: 1 });
+	return useQuery({ queryKey: providerAccountsKey, queryFn: fetchProviderAccounts, enabled, refetchInterval: 30000, retry: 1 });
+}
+export async function setCodexQuotaAutoSwitch(enabled: boolean): Promise<ProviderAccounts> {
+	const result = await apiClient.PATCH("/api/v1/provider-accounts/quota-auto-switch", { body: { enabled } });
+	if (result.error) throw new Error(apiErrorMessage(result.error));
+	return result.data!;
 }
 export async function changeProviderAccount(accountId: string, action: "primary" | "sign-out" | "remove", replacementPrimaryId?: string): Promise<ProviderAccounts> {
 	const params = { path: { accountId } };
@@ -28,8 +33,11 @@ export async function changeProviderAccount(accountId: string, action: "primary"
 	if (result.error) throw new Error(apiErrorMessage(result.error));
 	return result.data!;
 }
-export async function startProviderLogin(provider: "codex" | "claude", accountId?: string): Promise<ProviderLogin> {
-	const { data, error } = await apiClient.POST("/api/v1/provider-accounts/login", { body: { provider, accountId } });
+export type ProviderLoginInput = { provider: "codex" | "claude"; accountId?: string; mode?: "browser" | "device" | "import" | "api_key"; apiKey?: string; baseUrl?: string; label?: string; credentialJson?: string };
+export async function startProviderLogin(input: ProviderLoginInput): Promise<ProviderLogin> {
+	const body = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== ""));
+	if (body.mode === "browser") delete body.mode;
+	const { data, error } = await apiClient.POST("/api/v1/provider-accounts/login", { body: body as ProviderLoginInput });
 	if (error) throw new Error(apiErrorMessage(error));
 	return data!;
 }

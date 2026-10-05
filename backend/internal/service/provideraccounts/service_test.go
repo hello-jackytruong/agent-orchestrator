@@ -75,14 +75,55 @@ func (m *memoryStore) FinishProviderAccountIntent(_ context.Context, revision in
 }
 
 type fakeProxy struct {
-	mu       sync.Mutex
-	snapshot ports.ProviderRouteSnapshot
-	deleted  []string
-	fail     string
-	applied  []ports.ProviderRouteSnapshot
+	mu          sync.Mutex
+	snapshot    ports.ProviderRouteSnapshot
+	deleted     []string
+	fail        string
+	applied     []ports.ProviderRouteSnapshot
+	quotaEvents []ports.ProviderQuotaEvent
+	ackedQuota  []string
+}
+
+type usageProxy struct {
+	*fakeProxy
+	usageCalls int
+	usage      domain.ProviderAccountUsage
+	usageErr   error
+}
+
+func (p *usageProxy) FetchAccountUsage(context.Context, string, string, string) (domain.ProviderAccountUsage, error) {
+	p.usageCalls++
+	return p.usage, p.usageErr
+}
+
+func (p *fakeProxy) QuotaEvents(context.Context) ([]ports.ProviderQuotaEvent, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]ports.ProviderQuotaEvent(nil), p.quotaEvents...), nil
+}
+func (p *fakeProxy) AckQuotaEvents(_ context.Context, ids []string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ackedQuota = append(p.ackedQuota, ids...)
+	kept := p.quotaEvents[:0]
+	for _, event := range p.quotaEvents {
+		found := false
+		for _, id := range ids {
+			if event.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			kept = append(kept, event)
+		}
+	}
+	p.quotaEvents = kept
+	return nil
 }
 
 func (p *fakeProxy) ApplyRoutes(_ context.Context, s ports.ProviderRouteSnapshot) error {
+	s.RequestBoundary = false
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.fail == "apply" {
@@ -183,6 +224,42 @@ func TestProviderAccountFirstLoginAndSeparatePrimaries(t *testing.T) {
 		if err != nil || !managed || id != tc.want {
 			t.Fatalf("resolved=%s managed=%t err=%v", id, managed, err)
 		}
+	}
+}
+
+func TestProviderAccountUsageIsSafeAndCached(t *testing.T) {
+	store := &memoryStore{}
+	proxy := &usageProxy{fakeProxy: &fakeProxy{}, usage: domain.ProviderAccountUsage{Status: "available", Plan: "Pro", Windows: []domain.ProviderAccountUsageWindow{{RemainingFraction: 0.75}}}}
+	svc := New(store, proxy, &fakeGuard{busy: make(map[domain.SessionID]bool)}, []byte("key"), "", func() string { return "account-1" })
+	id, err := svc.RecordLogin(context.Background(), "codex", "alice@example.test", "alice.json", "auth-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := svc.State(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := svc.AccountUsages(context.Background(), state.Accounts)
+	second := svc.AccountUsages(context.Background(), state.Accounts)
+	if proxy.usageCalls != 1 || first[id].Plan != "Pro" || second[id].Windows[0].RemainingFraction != 0.75 {
+		t.Fatalf("calls=%d first=%+v second=%+v", proxy.usageCalls, first[id], second[id])
+	}
+}
+
+func TestProviderAccountUsageKeepsInventoryWhenProviderCannotReport(t *testing.T) {
+	store := &memoryStore{}
+	proxy := &usageProxy{fakeProxy: &fakeProxy{}, usageErr: errTestFailure}
+	svc := New(store, proxy, &fakeGuard{busy: make(map[domain.SessionID]bool)}, []byte("key"), "", func() string { return "account-1" })
+	if _, err := svc.RecordLogin(context.Background(), "codex", "alice@example.test", "alice.json", "auth-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	state, err := svc.State(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := svc.AccountUsages(context.Background(), state.Accounts)
+	if usage[state.Accounts[0].ID].Status != "unavailable" || usage[state.Accounts[0].ID].Message != "Usage unavailable" {
+		t.Fatalf("usage=%+v", usage)
 	}
 }
 func TestProviderAccountPrimaryChangesOnlyNewSessions(t *testing.T) {

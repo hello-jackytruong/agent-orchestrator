@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -190,7 +191,7 @@ func (c *Client) probe(ctx context.Context) error {
 	if err := c.call(ctx, http.MethodGet, "/ao/status", nil, &status, nil); err != nil {
 		return err
 	}
-	if status.ProtocolVersion != 1 {
+	if status.ProtocolVersion != 2 {
 		return errProtocol
 	}
 	return nil
@@ -275,14 +276,170 @@ func (c *Client) ApplyRoutes(ctx context.Context, snapshot ports.ProviderRouteSn
 	if err := c.call(ctx, http.MethodPut, "/ao/routes", snapshot, &acknowledged, nil); err != nil {
 		return err
 	}
-	if acknowledged.Revision != snapshot.Revision || !slices.Equal(acknowledged.Routes, snapshot.Routes) {
+	if acknowledged.Revision != snapshot.Revision || !slices.Equal(acknowledged.Routes, snapshot.Routes) || !slices.Equal(acknowledged.AuthIDs, snapshot.AuthIDs) || acknowledged.CodexPrimaryGeneration != snapshot.CodexPrimaryGeneration {
 		return errors.New("proxy routing acknowledgement does not match the requested snapshot")
 	}
 	return nil
 }
 
+// QuotaEvents returns provider-confirmed Codex usage-limit events waiting for
+// AO to decide whether the primary should move.
+func (c *Client) QuotaEvents(ctx context.Context) ([]ports.ProviderQuotaEvent, error) {
+	if err := c.Ensure(ctx); err != nil {
+		return nil, err
+	}
+	var response struct {
+		Events []ports.ProviderQuotaEvent `json:"events"`
+	}
+	if err := c.call(ctx, http.MethodGet, "/ao/quota-events", nil, &response, nil); err != nil {
+		return nil, err
+	}
+	return response.Events, nil
+}
+
+// AckQuotaEvents removes events that AO has handled or determined to be stale.
+func (c *Client) AckQuotaEvents(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := c.Ensure(ctx); err != nil {
+		return err
+	}
+	return c.call(ctx, http.MethodPost, "/ao/quota-events/ack", struct {
+		IDs []string `json:"ids"`
+	}{IDs: ids}, nil, nil)
+}
+
+type codexUsageWindow struct {
+	UsedPercent   *float64 `json:"used_percent"`
+	WindowMinutes int64    `json:"window_minutes"`
+	ResetAfter    int64    `json:"reset_after_seconds"`
+	ResetAt       int64    `json:"reset_at"`
+}
+
+type codexUsageLimits struct {
+	Primary         *codexUsageWindow `json:"primary"`
+	Secondary       *codexUsageWindow `json:"secondary"`
+	PrimaryWindow   *codexUsageWindow `json:"primary_window"`
+	SecondaryWindow *codexUsageWindow `json:"secondary_window"`
+}
+
+type codexAdditionalLimit struct {
+	Name      string            `json:"limit_name"`
+	RateLimit *codexUsageLimits `json:"rate_limit"`
+	Primary   *codexUsageWindow `json:"primary"`
+}
+
+type codexUsageResponse struct {
+	PlanType            string                 `json:"plan_type"`
+	RateLimits          *codexUsageLimits      `json:"rate_limits"`
+	RateLimit           *codexUsageLimits      `json:"rate_limit"`
+	AdditionalRateLimit []codexAdditionalLimit `json:"additional_rate_limits"`
+}
+
+type claudeUsageWindow struct {
+	Utilization float64 `json:"utilization"`
+	ResetAt     string  `json:"resets_at"`
+}
+
+type claudeUsageResponse struct {
+	FiveHour *claudeUsageWindow `json:"five_hour"`
+	SevenDay *claudeUsageWindow `json:"seven_day"`
+}
+
+// FetchAccountUsage asks the helper to use CLIProxy's native authenticated
+// provider usage request. AO never handles tokens or credential indexes.
+func (c *Client) FetchAccountUsage(ctx context.Context, provider, authID, credentialRef string) (domain.ProviderAccountUsage, error) {
+	if strings.TrimSpace(authID) == "" || strings.TrimSpace(credentialRef) == "" || (provider != "codex" && provider != "claude") {
+		return domain.ProviderAccountUsage{}, errors.New("account is not signed in")
+	}
+	if err := c.Ensure(ctx); err != nil {
+		return domain.ProviderAccountUsage{}, err
+	}
+	var raw json.RawMessage
+	if err := c.call(ctx, http.MethodPost, "/ao/account-usage", struct {
+		AuthID   string `json:"auth_id"`
+		Provider string `json:"provider"`
+	}{AuthID: authID, Provider: provider}, &raw, nil); err != nil {
+		return domain.ProviderAccountUsage{}, err
+	}
+	if provider == "claude" {
+		var quota claudeUsageResponse
+		if err := json.Unmarshal(raw, &quota); err != nil {
+			return domain.ProviderAccountUsage{}, err
+		}
+		usage := domain.ProviderAccountUsage{Status: "available", CheckedAt: time.Now().UTC()}
+		appendClaude := func(name string, window *claudeUsageWindow) {
+			if window == nil || window.Utilization < 0 || window.Utilization > 100 {
+				return
+			}
+			usage.Windows = append(usage.Windows, domain.ProviderAccountUsageWindow{Name: name, RemainingFraction: 1 - window.Utilization/100, ResetTime: window.ResetAt})
+		}
+		appendClaude("5 hour", quota.FiveHour)
+		appendClaude("7 day", quota.SevenDay)
+		if len(usage.Windows) == 0 {
+			return domain.ProviderAccountUsage{}, errors.New("Claude usage response contained no quota data")
+		}
+		return usage, nil
+	}
+	var quota codexUsageResponse
+	if err := json.Unmarshal(raw, &quota); err != nil {
+		return domain.ProviderAccountUsage{}, err
+	}
+	usage := domain.ProviderAccountUsage{Status: "available", CheckedAt: time.Now().UTC()}
+	usage.Plan = strings.TrimSpace(quota.PlanType)
+	appendWindow := func(name string, window *codexUsageWindow) {
+		if window == nil || window.UsedPercent == nil || *window.UsedPercent < 0 || *window.UsedPercent > 100 {
+			return
+		}
+		remaining := 1 - (*window.UsedPercent / 100)
+		reset := ""
+		if window.ResetAt > 0 {
+			reset = time.Unix(window.ResetAt, 0).UTC().Format(time.RFC3339)
+		} else if window.ResetAfter >= 0 {
+			reset = time.Now().UTC().Add(time.Duration(window.ResetAfter) * time.Second).Format(time.RFC3339)
+		}
+		usage.Windows = append(usage.Windows, domain.ProviderAccountUsageWindow{Name: name, RemainingFraction: remaining, ResetTime: reset})
+	}
+	appendLimits := func(limits *codexUsageLimits) {
+		if limits == nil {
+			return
+		}
+		primary, secondary := limits.Primary, limits.Secondary
+		if primary == nil {
+			primary = limits.PrimaryWindow
+		}
+		if secondary == nil {
+			secondary = limits.SecondaryWindow
+		}
+		appendWindow("primary", primary)
+		appendWindow("secondary", secondary)
+	}
+	appendLimits(quota.RateLimits)
+	appendLimits(quota.RateLimit)
+	for _, limit := range quota.AdditionalRateLimit {
+		rates := limit.RateLimit
+		if rates != nil {
+			appendWindow(strings.TrimSpace(limit.Name)+" primary", rates.Primary)
+			appendWindow(strings.TrimSpace(limit.Name)+" secondary", rates.Secondary)
+		} else {
+			appendWindow(strings.TrimSpace(limit.Name)+" primary", limit.Primary)
+		}
+	}
+	if usage.Plan == "" && len(usage.Windows) == 0 {
+		return domain.ProviderAccountUsage{}, errors.New("Codex usage response contained no quota data")
+	}
+	return usage, nil
+}
+
 // DeleteCredential removes an upstream credential and verifies an already missing file.
 func (c *Client) DeleteCredential(ctx context.Context, name string) error {
+	if strings.HasPrefix(name, "config:") && len(name) > len("config:") && !strings.ContainsAny(name, "/\\") {
+		if err := c.Ensure(ctx); err != nil {
+			return err
+		}
+		return c.call(ctx, http.MethodDelete, "/ao/api-key?ref="+queryEscape(name), nil, nil, nil)
+	}
 	if name == "" || name == "." || name == ".." || filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
 		return errors.New("invalid credential reference")
 	}

@@ -26,6 +26,15 @@ type accountHTTPFake struct {
 	signOut           bool
 }
 
+type usageHTTPFake struct {
+	*accountHTTPFake
+	usage map[string]domain.ProviderAccountUsage
+}
+
+func (f *usageHTTPFake) AccountUsages(context.Context, []domain.ProviderAccount) map[string]domain.ProviderAccountUsage {
+	return f.usage
+}
+
 func (f *accountHTTPFake) State(context.Context) (domain.ProviderAccountState, error) {
 	return f.state, f.err
 }
@@ -111,6 +120,25 @@ func TestProviderAccountsHTTPSafeInventory(t *testing.T) {
 	}
 	if !data.Accounts[2].Primary || !reflect.DeepEqual(data.Accounts[2].Sessions, []string{"s2"}) {
 		t.Fatalf("claude=%+v", data.Accounts[2])
+	}
+}
+
+func TestProviderAccountsHTTPIncludesSafeUsageSummary(t *testing.T) {
+	base := &accountHTTPFake{state: domain.ProviderAccountState{Accounts: []domain.ProviderAccount{{ID: "a", Provider: "codex", Email: "a@example.test", CredentialRef: "PRIVATE", AuthID: "PRIVATE-AUTH"}}}}
+	f := &usageHTTPFake{accountHTTPFake: base, usage: map[string]domain.ProviderAccountUsage{"a": {Status: "available", Plan: "Pro", Windows: []domain.ProviderAccountUsageWindow{{Name: "5 hour", RemainingFraction: 0.75, ResetTime: "2030-01-01T00:00:00Z"}}}}}
+	out := accountHTTPRequest(t, &controllers.ProviderAccountsController{Svc: f}, "GET", "/provider-accounts", "")
+	if out.Code != 200 {
+		t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+	}
+	var response controllers.ProviderAccountsResponse
+	if err := json.Unmarshal(out.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Accounts[0].Usage == nil || response.Accounts[0].Usage.Plan != "Pro" || response.Accounts[0].Usage.Windows[0].RemainingFraction != 0.75 {
+		t.Fatalf("usage=%+v", response.Accounts[0].Usage)
+	}
+	if strings.Contains(out.Body.String(), "PRIVATE") {
+		t.Fatal("private account data leaked through usage response")
 	}
 }
 func TestProviderAccountsHTTPEmptyAndAdoptedProvider(t *testing.T) {
@@ -275,5 +303,34 @@ func TestProviderAccountsHTTPUnavailableAlwaysReplies(t *testing.T) {
 				t.Fatalf("status=%d", out.Code)
 			}
 		})
+	}
+}
+
+type requestSwitchHTTPFake struct {
+	*accountHTTPFake
+	enabled bool
+}
+
+func (f *requestSwitchHTTPFake) CodexRequestSwitching() bool { return f.enabled }
+
+func TestProviderAccountsHTTPAdvertisesOnlyEnabledRequestSwitching(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		f := &requestSwitchHTTPFake{accountHTTPFake: &accountHTTPFake{}, enabled: enabled}
+		out := accountHTTPRequest(t, &controllers.ProviderAccountsController{Svc: f}, "GET", "/provider-accounts", "")
+		if out.Code != 200 {
+			t.Fatalf("status=%d", out.Code)
+		}
+		var data map[string]json.RawMessage
+		if err := json.Unmarshal(out.Body.Bytes(), &data); err != nil {
+			t.Fatal(err)
+		}
+		capability, present := data["codexRequestSwitching"]
+		if present != enabled || (enabled && string(capability) != "true") {
+			t.Fatalf("capability=%s present=%v", capability, present)
+		}
+	}
+	legacy := accountHTTPRequest(t, &controllers.ProviderAccountsController{Svc: &accountHTTPFake{}}, "GET", "/provider-accounts", "")
+	if legacy.Code != 200 || strings.Contains(legacy.Body.String(), "codexRequestSwitching") {
+		t.Fatal("old service unexpectedly advertised the experiment")
 	}
 }

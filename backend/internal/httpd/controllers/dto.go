@@ -2952,14 +2952,33 @@ type InstallIDParam struct {
 	InstallID string `path:"installId" description:"The device's stable install id."`
 }
 
+// ProviderAccountUsageWindowView exposes one safe, normalized quota window.
+type ProviderAccountUsageWindowView struct {
+	Name              string  `json:"name,omitempty"`
+	RemainingFraction float64 `json:"remainingFraction"`
+	ResetTime         string  `json:"resetTime,omitempty"`
+}
+
+// ProviderAccountUsageView exposes best-effort quota information without
+// private credential references or raw provider responses.
+type ProviderAccountUsageView struct {
+	Status    string                           `json:"status" enum:"available,unavailable"`
+	Plan      string                           `json:"plan,omitempty"`
+	Windows   []ProviderAccountUsageWindowView `json:"windows,omitempty"`
+	CheckedAt time.Time                        `json:"checkedAt,omitempty"`
+	Message   string                           `json:"message,omitempty"`
+}
+
 // ProviderAccountView exposes account identity and usage without private credential references.
 type ProviderAccountView struct {
-	ID       string   `json:"id"`
-	Provider string   `json:"provider" enum:"codex,claude"`
-	Email    string   `json:"email"`
-	SignedIn bool     `json:"signedIn"`
-	Primary  bool     `json:"primary"`
-	Sessions []string `json:"sessions"`
+	ID       string                    `json:"id"`
+	Provider string                    `json:"provider" enum:"codex,claude"`
+	Email    string                    `json:"email"`
+	Kind     string                    `json:"kind,omitempty" enum:"oauth,imported,api_key"`
+	SignedIn bool                      `json:"signedIn"`
+	Primary  bool                      `json:"primary"`
+	Sessions []string                  `json:"sessions"`
+	Usage    *ProviderAccountUsageView `json:"usage,omitempty"`
 }
 
 // ProviderPrimaryView describes the default account for new sessions of one provider.
@@ -2971,9 +2990,16 @@ type ProviderPrimaryView struct {
 
 // ProviderAccountsResponse contains the account catalogue, defaults, and recovery state.
 type ProviderAccountsResponse struct {
-	Accounts         []ProviderAccountView `json:"accounts"`
-	Defaults         []ProviderPrimaryView `json:"defaults"`
-	RecoveryRequired bool                  `json:"recoveryRequired"`
+	CodexRequestSwitching bool                  `json:"codexRequestSwitching,omitempty"`
+	CodexQuotaAutoSwitch  bool                  `json:"codexQuotaAutoSwitch,omitempty"`
+	Accounts              []ProviderAccountView `json:"accounts"`
+	Defaults              []ProviderPrimaryView `json:"defaults"`
+	RecoveryRequired      bool                  `json:"recoveryRequired"`
+}
+
+// UpdateCodexQuotaAutoSwitchRequest changes automatic primary recovery.
+type UpdateCodexQuotaAutoSwitchRequest struct {
+	Enabled *bool `json:"enabled"`
 }
 
 // ProviderAccountChangeRequest selects an account or a replacement primary for an account operation.
@@ -2987,15 +3013,23 @@ func (ProviderAccountChangeRequest) ForceRequestBody() {}
 
 // ProviderLoginRequest starts a new login or signs an existing entry in again.
 type ProviderLoginRequest struct {
-	Provider  string `json:"provider" enum:"codex,claude"`
-	AccountID string `json:"accountId,omitempty"`
+	Provider       string `json:"provider" enum:"codex,claude"`
+	AccountID      string `json:"accountId,omitempty"`
+	Mode           string `json:"mode,omitempty" enum:"browser,device,import,api_key"`
+	APIKey         string `json:"apiKey,omitempty"`
+	BaseURL        string `json:"baseUrl,omitempty"`
+	Label          string `json:"label,omitempty"`
+	CredentialJSON string `json:"credentialJson,omitempty"`
 }
 
 // ProviderLoginResponse exposes login progress and its browser link without OAuth state.
 type ProviderLoginResponse struct {
 	ID        string `json:"id"`
 	Provider  string `json:"provider"`
-	URL       string `json:"url"`
+	Mode      string `json:"mode,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Code      string `json:"code,omitempty"`
+	ExpiresIn int    `json:"expiresIn,omitempty"`
 	Status    string `json:"status" enum:"waiting,complete,failed,cancelled"`
 	AccountID string `json:"accountId"`
 }

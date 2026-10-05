@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	proxyapi "github.com/router-for-me/CLIProxyAPI/v8/sdk/api"
@@ -37,6 +38,57 @@ func Build(root string, port int, controlKey, inferenceKey string, routes *Route
 	}
 	cfg.RemoteManagement.SecretKey = string(secret)
 	path := filepath.Join(root, "config.yaml")
+	if _, statErr := os.Stat(path); statErr == nil {
+		stored, loadErr := config.LoadConfig(path)
+		if loadErr != nil && strings.Contains(loadErr.Error(), "credential-in-flight") {
+			// Configs written by an older embedded SDK can contain an empty
+			// credential-in-flight block. Remove only that block and let the
+			// current SDK apply its documented defaults on the next load.
+			if raw, readErr := os.ReadFile(path); readErr == nil {
+				var document map[string]any
+				if decodeErr := yaml.Unmarshal(raw, &document); decodeErr == nil {
+					delete(document, "credential-in-flight")
+					if repaired, encodeErr := yaml.Marshal(document); encodeErr == nil {
+						_ = writePrivate(path, repaired)
+						stored, loadErr = config.LoadConfig(path)
+					}
+				}
+			}
+		}
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		cfg = stored
+		cfg.Host = "127.0.0.1"
+		cfg.Port = port
+		cfg.AuthDir = filepath.Join(root, "auth")
+		cfg.CommercialMode = true
+		cfg.MaxRetryCredentials = 1
+		cfg.WebsocketAuth = true
+		cfg.APIKeys = []string{inferenceKey}
+		cfg.Routing.Strategy = "fill-first"
+		cfg.RemoteManagement.DisableControlPanel = true
+		cfg.RemoteManagement.DisableAutoUpdatePanel = true
+		cfg.RemoteManagement.SecretKey = string(secret)
+	} else if errors.Is(statErr, os.ErrNotExist) {
+		cfg, err = config.LoadConfigOptional(path, true)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Host = "127.0.0.1"
+		cfg.Port = port
+		cfg.AuthDir = filepath.Join(root, "auth")
+		cfg.CommercialMode = true
+		cfg.MaxRetryCredentials = 1
+		cfg.WebsocketAuth = true
+		cfg.APIKeys = []string{inferenceKey}
+		cfg.Routing.Strategy = "fill-first"
+		cfg.RemoteManagement.DisableControlPanel = true
+		cfg.RemoteManagement.DisableAutoUpdatePanel = true
+		cfg.RemoteManagement.SecretKey = string(secret)
+	} else {
+		return nil, statErr
+	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return nil, err
@@ -44,8 +96,9 @@ func Build(root string, port int, controlKey, inferenceKey string, routes *Route
 	if err = writePrivate(path, data); err != nil {
 		return nil, err
 	}
-	boundary := Boundary{Routes: routes, ControlKey: controlKey, InferenceKey: inferenceKey}
+	boundary := Boundary{Routes: routes, ControlKey: controlKey, InferenceKey: inferenceKey, LoginInputs: NewLoginInputs(path, cfg.AuthDir)}
 	return cliproxy.NewBuilder().WithConfig(cfg).WithConfigPath(path).WithLocalManagementPassword(controlKey).
+		WithResultPolicy(quotaResultPolicy{routes: routes}).
 		WithPostAuthHook(tagLogin).WithServerOptions(proxyapi.WithEngineConfigurator(func(e *gin.Engine) { e.Use(boundary.Middleware) }), proxyapi.WithRouterConfigurator(boundary.Configure)).Build()
 }
 func Run(ctx context.Context, root string, port int, controlKey, inferenceKey string) error {

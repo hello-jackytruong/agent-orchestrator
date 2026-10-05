@@ -1330,6 +1330,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/provider-accounts/quota-auto-switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Enable or disable automatic Codex quota primary switching */
+        patch: operations["setCodexQuotaAutoSwitch"];
+        trace?: never;
+    };
     "/api/v1/prs/{id}/merge": {
         parameters: {
             query?: never;
@@ -4503,32 +4520,61 @@ export interface components {
             accountId?: string;
             replacementPrimaryId?: string;
         };
+        ProviderAccountUsageView: {
+            /** Format: date-time */
+            checkedAt?: string;
+            message?: string;
+            plan?: string;
+            /** @enum {string} */
+            status: "available" | "unavailable";
+            windows?: components["schemas"]["ProviderAccountUsageWindowView"][];
+        };
+        ProviderAccountUsageWindowView: {
+            name?: string;
+            /** Format: double */
+            remainingFraction: number;
+            resetTime?: string;
+        };
         ProviderAccountView: {
             email: string;
             id: string;
+            /** @enum {string} */
+            kind?: "oauth" | "imported" | "api_key";
             primary: boolean;
             /** @enum {string} */
             provider: "codex" | "claude";
             sessions: string[];
             signedIn: boolean;
+            usage?: components["schemas"]["ProviderAccountUsageView"];
         };
         ProviderAccountsResponse: {
             accounts: components["schemas"]["ProviderAccountView"][];
+            codexQuotaAutoSwitch?: boolean;
+            codexRequestSwitching?: boolean;
             defaults: components["schemas"]["ProviderPrimaryView"][];
             recoveryRequired: boolean;
         };
         ProviderLoginRequest: {
             accountId?: string;
+            apiKey?: string;
+            baseUrl?: string;
+            credentialJson?: string;
+            label?: string;
+            /** @enum {string} */
+            mode?: "browser" | "device" | "import" | "api_key";
             /** @enum {string} */
             provider: "codex" | "claude";
         };
         ProviderLoginResponse: {
             accountId: string;
+            code?: string;
+            expiresIn?: number;
             id: string;
+            mode?: string;
             provider: string;
             /** @enum {string} */
             status: "waiting" | "complete" | "failed" | "cancelled";
-            url: string;
+            url?: string;
         };
         ProviderPrimaryView: {
             managed: boolean;
@@ -5228,6 +5274,9 @@ export interface components {
             prompt?: null | string;
             rrule?: null | string;
             timezone?: null | string;
+        };
+        UpdateCodexQuotaAutoSwitchRequest: {
+            enabled: null | boolean;
         };
         UpdateProjectSettingsInput: {
             config: components["schemas"]["ProjectConfig"];
@@ -10146,6 +10195,66 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setCodexQuotaAutoSwitch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCodexQuotaAutoSwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderAccountsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
             };
             /** @description Service Unavailable */
             503: {

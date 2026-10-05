@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderAccountsSection } from "./ProviderAccountsSection";
 import type { ProviderAccount, ProviderAccounts } from "../../hooks/useProviderAccounts";
 
-const mock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), remove: vi.fn(), open: vi.fn() }));
-vi.mock("../../lib/api-client", () => ({ apiClient: { GET: mock.get, POST: mock.post, PUT: mock.put, DELETE: mock.remove }, apiErrorMessage: (error: { message: string }) => error.message }));
+const mock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), remove: vi.fn(), open: vi.fn() }));
+vi.mock("../../lib/api-client", () => ({ apiClient: { GET: mock.get, POST: mock.post, PUT: mock.put, PATCH: mock.patch, DELETE: mock.remove }, apiErrorMessage: (error: { message: string }) => error.message }));
 vi.mock("../../lib/bridge", () => ({ aoBridge: { app: { openExternal: mock.open } } }));
 let inventory: ProviderAccounts;
 function renderAccounts() {
@@ -22,10 +22,11 @@ const bob: ProviderAccount = { id: "b", provider: "codex", email: "bob@example.t
 const clara: ProviderAccount = { id: "c", provider: "claude", email: "clara@example.test", signedIn: true, primary: true, sessions: [] };
 beforeEach(() => {
 	vi.clearAllMocks();
-	inventory = { accounts: [structuredClone(alice), structuredClone(bob), structuredClone(clara)], defaults: [{ provider: "codex", primaryId: "a", managed: true }, { provider: "claude", primaryId: "c", managed: true }], recoveryRequired: false };
+	inventory = { accounts: [structuredClone(alice), structuredClone(bob), structuredClone(clara)], defaults: [{ provider: "codex", primaryId: "a", managed: true }, { provider: "claude", primaryId: "c", managed: true }], recoveryRequired: false, codexQuotaAutoSwitch: false };
 	mock.get.mockImplementation(async (path: string) => path === "/api/v1/provider-accounts" ? { data: inventory } : { data: { id: "login-1", provider: "codex", url: "https://provider.test/login", status: "waiting", accountId: "" } });
 	mock.post.mockResolvedValue({ data: inventory });
 	mock.put.mockResolvedValue({ data: inventory });
+	mock.patch.mockResolvedValue({ data: { ...inventory, codexQuotaAutoSwitch: true } });
 	mock.remove.mockResolvedValue({ data: inventory });
 	mock.open.mockResolvedValue(undefined);
 });
@@ -43,6 +44,14 @@ describe("provider account inventory", () => {
 		expect(within(accountRow(alice.email)).queryByRole("button", { name: "Make primary" })).toBeNull();
 		expect(screen.getByText(/Existing sessions keep their account/)).toBeInTheDocument();
 	});
+	it("shows provider usage without changing account controls", async () => {
+		inventory.accounts[0].usage = { status: "available", plan: "Pro", windows: [{ name: "5 hour", remainingFraction: 0.75, resetTime: "2030-01-01T00:00:00Z" }] };
+		inventory.accounts[1].usage = { status: "unavailable", message: "Usage unavailable" };
+		renderAccounts();
+		await screen.findByText(alice.email);
+		expect(screen.getByTestId("provider-account-usage-a")).toHaveTextContent("Pro · 75% remaining · resets 2030-01-01T00:00:00Z");
+		expect(screen.getByTestId("provider-account-usage-b")).toHaveTextContent("Usage unavailable");
+	});
 	it("changes only the selected provider primary and explains existing sessions", async () => {
 		const user = userEvent.setup();
 		renderAccounts();
@@ -59,6 +68,21 @@ describe("provider account inventory", () => {
 		await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Make primary" }));
 		expect(await screen.findByRole("status")).toHaveTextContent("Account is signed out");
 		expect(screen.getByText(alice.email)).toBeInTheDocument();
+	});
+	it("allows Codex quota auto-switching to be enabled", async () => {
+		const user = userEvent.setup();
+		renderAccounts();
+		const toggle = await screen.findByRole("checkbox", { name: /Automatically switch the Codex primary/ });
+		await user.click(toggle);
+		expect(mock.patch).toHaveBeenCalledWith("/api/v1/provider-accounts/quota-auto-switch", { body: { enabled: true } });
+	});
+	it("keeps quota auto-switch visible but disabled until a second Codex account is signed in", async () => {
+		inventory.accounts = [structuredClone(alice), structuredClone(clara)];
+		renderAccounts();
+		const toggle = await screen.findByRole("checkbox", { name: /Automatically switch the Codex primary/ });
+		expect(toggle).toBeDisabled();
+		expect(screen.getByRole("img", { name: "Sign in to a second Codex account to enable automatic switching." })).toBeInTheDocument();
+		expect(mock.patch).not.toHaveBeenCalled();
 	});
 	it("shows signed-out entries and supports signing in again", async () => {
 		inventory.accounts[1] = { ...bob, signedIn: false, sessions: [] };
@@ -142,7 +166,8 @@ describe("provider browser login", () => {
 		mock.post.mockResolvedValue({ data: { id: "login-1", provider: "codex", url: "https://provider.test/login", status: "waiting", accountId: "" } });
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
-		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex", accountId: undefined } });
+		await user.click(screen.getByRole("button", { name: "Browser" }));
+		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex" } });
 		expect(await screen.findByText("Complete sign-in in your browser.")).toBeInTheDocument();
 		expect(screen.getAllByRole("button", { name: "Add account" }).every(b => (b as HTMLButtonElement).disabled)).toBe(true);
 		await user.click(screen.getByRole("button", { name: "Open sign-in" }));
@@ -155,6 +180,7 @@ describe("provider browser login", () => {
 		mock.post.mockResolvedValue({ error: { message: "Login callback port is in use; retry later" } });
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[1]);
+		await user.click(screen.getByRole("button", { name: "Browser" }));
 		expect(await screen.findByRole("status")).toHaveTextContent("Login callback port is in use");
 		expect(mock.open).not.toHaveBeenCalled();
 		expect(screen.getAllByRole("button", { name: "Add account" })[1]).toBeEnabled();
@@ -164,6 +190,7 @@ describe("provider browser login", () => {
 		mock.open.mockRejectedValue(new Error("Browser could not be opened"));
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.click(screen.getByRole("button", { name: "Browser" }));
 		expect(await screen.findByRole("status")).toHaveTextContent("Browser could not be opened");
 		expect(screen.getByRole("button", { name: "Open sign-in" })).toBeEnabled();
 	});
@@ -177,6 +204,7 @@ describe("pending login continuity", () => {
 		const first = render(<QueryClientProvider client={cache}><ProviderAccountsSection /></QueryClientProvider>);
 		await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.click(screen.getByRole("button", { name: "Browser" }));
 		await screen.findByText("Complete sign-in in your browser.");
 		expect(mock.open).toHaveBeenCalledTimes(1);
 		expect(mock.post).toHaveBeenCalledTimes(1);
@@ -201,6 +229,7 @@ describe("pending login continuity", () => {
 			? { data: inventory }
 			: { data: { id: "login-1", provider: "claude", url: "https://provider.test/login", status: "complete", accountId: "new-account" } });
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[1]);
+		await user.click(screen.getByRole("button", { name: "Browser" }));
 		await screen.findByText("Complete sign-in in your browser.");
 		await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Account signed in."), { timeout: 3000 });
 		expect(screen.queryByRole("button", { name: "Open sign-in" })).toBeNull();
@@ -218,6 +247,7 @@ describe("pending login continuity", () => {
 		renderAccounts();
 		await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.click(screen.getByRole("button", { name: "Browser" }));
 		await screen.findByText("Complete sign-in in your browser.");
 		await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Sign-in failed. Please sign in again."), { timeout: 3000 });
 		expect(screen.queryByText(/Account signed in/)).toBeNull();
@@ -233,6 +263,7 @@ describe("pending login continuity", () => {
 		const cache = renderAccounts();
 		await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.click(screen.getByRole("button", { name: "Browser" }));
 		await screen.findByText("Complete sign-in in your browser.");
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
 		expect(await screen.findByRole("status")).toHaveTextContent("Unable to cancel login. Try again.");
@@ -250,6 +281,7 @@ describe("pending login continuity", () => {
 		const cache = renderAccounts();
 		await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.click(screen.getByRole("button", { name: "Browser" }));
 		await screen.findByText("Complete sign-in in your browser.");
 		await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("AO is reconnecting"), { timeout: 3000 });
 		expect(cache.getQueryData(["provider-account-login"])).toMatchObject({ status: "waiting" });
@@ -344,9 +376,92 @@ describe("login after daemon replacement", () => {
 		mock.post.mockResolvedValue({ data: { id: "new-attempt", provider: "codex", url: "https://provider.test/new", status: "waiting", accountId: "" } });
 		const user = userEvent.setup();
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.click(screen.getByRole("button", { name: "Browser" }));
 		expect(mock.open).toHaveBeenCalledWith("https://provider.test/new");
 		expect(cache.getQueryData(["provider-account-login"])).toMatchObject({ id: "new-attempt", status: "waiting" });
 		expect(screen.getByText(alice.email)).toBeInTheDocument();
 		expect(mock.put).not.toHaveBeenCalled();
 	});
+});
+
+describe("additional CLIProxy credential methods", () => {
+	it("offers browser, device, API key and JSON import for Codex", async () => {
+		const user = userEvent.setup();
+		renderAccounts();
+		await screen.findByText(alice.email);
+		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		const group = screen.getByRole("group", { name: "codex sign-in methods" });
+		expect(group).toBeInTheDocument();
+		expect(within(group).getByRole("button", { name: "Browser" })).toBeInTheDocument();
+		expect(within(group).getByRole("button", { name: "Device code" })).toBeInTheDocument();
+		expect(within(group).getByRole("button", { name: "API key" })).toBeInTheDocument();
+		expect(within(group).getByLabelText("Import JSON")).toBeInTheDocument();
+	});
+	it("starts Codex device login and keeps its code visible without opening an empty URL", async () => {
+		mock.post.mockResolvedValue({ data: { id: "device-1", provider: "codex", mode: "device", code: "ABCD-EFGH", status: "waiting", accountId: "" } });
+		const user = userEvent.setup();
+		renderAccounts();
+		await screen.findByText(alice.email);
+		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.click(screen.getByRole("button", { name: "Device code" }));
+		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex", mode: "device" } });
+		expect(await screen.findByText(/ABCD-EFGH/)).toBeInTheDocument();
+		expect(mock.open).not.toHaveBeenCalled();
+	});
+	it("sends the API key and base URL through AO without rendering the key", async () => {
+		mock.post.mockResolvedValue({ data: { id: "key-1", provider: "codex", mode: "api_key", status: "waiting", accountId: "" } });
+		const user = userEvent.setup();
+		renderAccounts();
+		await screen.findByText(alice.email);
+		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.type(screen.getByLabelText("API key"), "secret-api-key");
+		await user.type(screen.getByRole("textbox", { name: "Base URL" }), "https://api.example.test");
+		await user.click(screen.getByRole("button", { name: "Add API key" }));
+		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex", mode: "api_key", apiKey: "secret-api-key", baseUrl: "https://api.example.test" } });
+		expect(screen.queryByText("secret-api-key")).toBeNull();
+	});
+	it("reads a JSON file and sends its contents to the selected provider", async () => {
+		mock.post.mockResolvedValue({ data: { id: "import-1", provider: "codex", mode: "import", status: "waiting", accountId: "" } });
+		const user = userEvent.setup();
+		renderAccounts();
+		await screen.findByText(alice.email);
+		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		const file = new File([JSON.stringify({ type: "codex", email: "imported@example.test", access_token: "secret" })], "codex.json", { type: "application/json" });
+		await user.upload(within(screen.getByRole("group", { name: "codex sign-in methods" })).getByLabelText("Import JSON"), file);
+		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex", mode: "import", credentialJson: JSON.stringify({ type: "codex", email: "imported@example.test", access_token: "secret" }) } });
+	});
+	it("does not offer device login for Claude", async () => {
+		const user = userEvent.setup();
+		renderAccounts();
+		await screen.findByText(clara.email);
+		await user.click(screen.getAllByRole("button", { name: "Add account" })[1]);
+		const group = screen.getByRole("group", { name: "claude sign-in methods" });
+		expect(within(group).queryByRole("button", { name: "Device code" })).toBeNull();
+		expect(within(group).getByRole("button", { name: "Browser" })).toBeInTheDocument();
+	});
+});
+
+describe("experimental primary request switching", () => {
+ it("explains the affected Codex sessions and refreshes session assignments", async () => {
+  inventory.codexRequestSwitching = true;
+  const user = userEvent.setup();
+  const cache = renderAccounts();
+  const invalidate = vi.spyOn(cache, "invalidateQueries");
+  await screen.findByText(bob.email);
+  expect(screen.getByText(/Codex primary changes move sessions using the previous primary/)).toBeInTheDocument();
+  await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Make primary" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Primary changed. Codex sessions using the previous primary will use this account for their next API request.");
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["session-provider-account"] });
+  expect(mock.post).not.toHaveBeenCalled();
+  expect(mock.remove).not.toHaveBeenCalled();
+ });
+ it("keeps Claude primary semantics unchanged in the Codex experiment", async () => {
+  inventory.codexRequestSwitching = true;
+  inventory.accounts.push({ ...clara, id: "d", email: "claude-two@test.example", primary: false });
+  const user = userEvent.setup();
+  renderAccounts();
+  await screen.findByText("claude-two@test.example");
+  await user.click(within(accountRow("claude-two@test.example")).getByRole("button", { name: "Make primary" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Primary changed. Existing sessions keep their account.");
+ });
 });

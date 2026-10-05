@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 var ErrBusy = errors.New("session has an in-flight model request")
@@ -25,28 +26,50 @@ type Route struct {
 	AuthID     string `json:"auth_id"`
 }
 type Snapshot struct {
-	Revision uint64  `json:"revision"`
-	Routes   []Route `json:"routes"`
+	Revision               uint64   `json:"revision"`
+	Routes                 []Route  `json:"routes"`
+	AuthIDs                []string `json:"auth_ids,omitempty"`
+	RequestBoundary        bool     `json:"request_boundary,omitempty"`
+	CodexPrimaryGeneration int64    `json:"codex_primary_generation,omitempty"`
+}
+
+type QuotaEvent struct {
+	ID         string `json:"id"`
+	AuthID     string `json:"auth_id"`
+	ResetAt    int64  `json:"reset_at,omitempty"`
+	Generation int64  `json:"generation,omitempty"`
 }
 
 // Routes serializes durable snapshots with request admission. In-flight requests
-// retain their selected account; a changed route cannot be admitted until idle.
+// retain their selected account; Codex rebinds may apply at the next request.
 type Routes struct {
-	mu       sync.Mutex
-	path     string
-	snapshot Snapshot
-	byTicket map[string]Route
-	active   map[string]int
+	mu         sync.Mutex
+	path       string
+	quotaPath  string
+	snapshot   Snapshot
+	quota      []QuotaEvent
+	byTicket   map[string]Route
+	active     map[string]int
+	activeAuth map[string]int
 }
 
 func OpenRoutes(path string) (*Routes, error) {
-	r := &Routes{snapshot: Snapshot{Routes: []Route{}}, path: path, byTicket: make(map[string]Route), active: make(map[string]int)}
+	r := &Routes{snapshot: Snapshot{Routes: []Route{}}, path: path, quotaPath: path + ".quota", byTicket: make(map[string]Route), active: make(map[string]int), activeAuth: make(map[string]int)}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return r, nil
-	}
-	if err != nil {
+		data = nil
+	} else if err != nil {
 		return nil, err
+	}
+	if len(data) == 0 {
+		// A quota sidecar can only be useful after a routing snapshot exists, but
+		// loading it here makes recovery tolerant of an interrupted first write.
+		if quotaData, quotaErr := os.ReadFile(r.quotaPath); quotaErr == nil {
+			if err := json.Unmarshal(quotaData, &r.quota); err != nil {
+				return nil, fmt.Errorf("read quota events: %w", err)
+			}
+		}
+		return r, nil
 	}
 	if err = json.Unmarshal(data, &r.snapshot); err != nil {
 		return nil, fmt.Errorf("read routing snapshot: %w", err)
@@ -56,7 +79,68 @@ func OpenRoutes(path string) (*Routes, error) {
 		return nil, err
 	}
 	r.byTicket = index
+	if data, quotaErr := os.ReadFile(r.quotaPath); quotaErr == nil {
+		if err := json.Unmarshal(data, &r.quota); err != nil {
+			return nil, fmt.Errorf("read quota events: %w", err)
+		}
+	} else if !errors.Is(quotaErr, os.ErrNotExist) {
+		return nil, quotaErr
+	}
 	return r, nil
+}
+
+func (r *Routes) RecordQuota(authID string, resetAt time.Time) {
+	if authID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, event := range r.quota {
+		if event.AuthID == authID {
+			return
+		}
+	}
+	generation := r.snapshot.CodexPrimaryGeneration
+	if generation == 0 {
+		generation = 1
+	}
+	event := QuotaEvent{ID: TicketHash("quota:" + authID), AuthID: authID, Generation: generation}
+	if !resetAt.IsZero() {
+		event.ResetAt = resetAt.Unix()
+	}
+	r.quota = append(r.quota, event)
+	data, _ := json.Marshal(r.quota)
+	_ = writePrivate(r.quotaPath, data)
+}
+
+func (r *Routes) QuotaEvents() []QuotaEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]QuotaEvent(nil), r.quota...)
+}
+
+func (r *Routes) AckQuotaEvents(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		seen[id] = struct{}{}
+	}
+	kept := r.quota[:0]
+	for _, event := range r.quota {
+		if _, ok := seen[event.ID]; !ok {
+			kept = append(kept, event)
+		}
+	}
+	r.quota = kept
+	data, err := json.Marshal(r.quota)
+	if err != nil {
+		return err
+	}
+	return writePrivate(r.quotaPath, data)
 }
 func TicketHash(ticket string) string {
 	sum := sha256.Sum256([]byte(ticket))
@@ -66,6 +150,9 @@ func validateSnapshot(s Snapshot) (map[string]Route, error) {
 	index := make(map[string]Route, len(s.Routes))
 	sessions := make(map[string]bool, len(s.Routes))
 	for _, route := range s.Routes {
+		if s.AuthIDs != nil && route.AuthID != "" && !slices.Contains(s.AuthIDs, route.AuthID) {
+			return nil, errors.New("route account absent from signed-in inventory")
+		}
 		hash, err := hex.DecodeString(route.TicketHash)
 		if err != nil || len(hash) != 32 || strings.ToLower(route.TicketHash) != route.TicketHash || route.SessionID == "" || (route.Provider != "codex" && route.Provider != "claude") {
 			return nil, errors.New("invalid session route")
@@ -79,6 +166,8 @@ func validateSnapshot(s Snapshot) (map[string]Route, error) {
 	return index, nil
 }
 func (r *Routes) Apply(s Snapshot) error {
+	requestBoundary := s.RequestBoundary
+	s.RequestBoundary = false // Admission instruction, not an effective routing fact.
 	index, err := validateSnapshot(s)
 	if err != nil {
 		return err
@@ -91,11 +180,22 @@ func (r *Routes) Apply(s Snapshot) error {
 	if s.Revision == r.snapshot.Revision && string(old) == string(next) {
 		return nil
 	}
-	if s.Revision != r.snapshot.Revision+1 {
+	// Upgrade the pre-inventory snapshot without changing any route or revision.
+	bootstrap := !requestBoundary && r.snapshot.AuthIDs == nil && s.AuthIDs != nil && s.Revision == r.snapshot.Revision && slices.Equal(s.Routes, r.snapshot.Routes)
+	if s.Revision != r.snapshot.Revision+1 && !bootstrap {
 		return ErrRevision
+	}
+	for _, authID := range r.snapshot.AuthIDs {
+		if !slices.Contains(s.AuthIDs, authID) && r.activeAuth[authID] > 0 {
+			return ErrBusy
+		}
 	}
 	for hash, route := range r.byTicket {
 		if index[hash] != route && r.active[route.SessionID] > 0 {
+			next := index[hash]
+			if requestBoundary && slices.Contains(s.AuthIDs, route.AuthID) && slices.Contains(s.AuthIDs, next.AuthID) && route.Provider == "codex" && next.Provider == route.Provider && next.SessionID == route.SessionID && next.TicketHash == route.TicketHash {
+				continue
+			}
 			return ErrBusy
 		}
 	}
@@ -104,6 +204,8 @@ func (r *Routes) Apply(s Snapshot) error {
 	}
 	r.snapshot = s
 	r.snapshot.Routes = slices.Clone(s.Routes)
+	r.snapshot.AuthIDs = slices.Clone(s.AuthIDs)
+	r.snapshot.CodexPrimaryGeneration = s.CodexPrimaryGeneration
 	r.byTicket = index
 	return nil
 }
@@ -112,6 +214,7 @@ func (r *Routes) Snapshot() Snapshot {
 	defer r.mu.Unlock()
 	result := r.snapshot
 	result.Routes = slices.Clone(result.Routes)
+	result.AuthIDs = slices.Clone(result.AuthIDs)
 	return result
 }
 func (r *Routes) Acquire(ticket string) (Route, func(), error) {
@@ -125,12 +228,17 @@ func (r *Routes) Acquire(ticket string) (Route, func(), error) {
 		return Route{}, nil, errors.New("login required")
 	}
 	r.active[route.SessionID]++
+	r.activeAuth[route.AuthID]++
 	var once sync.Once
 	return route, func() {
 		once.Do(func() {
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			r.active[route.SessionID]--
+			r.activeAuth[route.AuthID]--
+			if r.activeAuth[route.AuthID] == 0 {
+				delete(r.activeAuth, route.AuthID)
+			}
 			if r.active[route.SessionID] == 0 {
 				delete(r.active, route.SessionID)
 			}

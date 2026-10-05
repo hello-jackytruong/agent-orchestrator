@@ -591,6 +591,9 @@ func Run() error {
 		return errors.New("session manager lacks managed account boundaries")
 	}
 	providerAccounts := provideraccountsvc.New(store, client, guard, key, client.Endpoint(), uuid.NewString)
+	if os.Getenv("AO_CODEX_REQUEST_ACCOUNT_SWITCHING") == "1" {
+		providerAccounts.EnableCodexRequestSwitching()
+	}
 	providerLogin := provideraccountsvc.NewLoginCoordinator(providerAccounts, client, uuid.NewString)
 	routing.SetProviderAccounts(providerAccounts)
 	sessionSvc.SetProviderAccounts(providerAccounts)
@@ -614,6 +617,9 @@ func Run() error {
 	if err := providerAccounts.RestoreHost(ctx); err != nil {
 		log.Warn("managed account recovery requires attention", "error", err)
 	}
+	if err := providerAccounts.ProcessCodexQuotaEvents(ctx); err != nil {
+		log.Debug("managed account quota recovery is not ready", "error", err)
+	}
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -628,6 +634,9 @@ func Run() error {
 					log.Warn("managed account helper requires attention", "error", failure)
 				}
 				reported = failure != nil
+				if quotaErr := providerAccounts.ProcessCodexQuotaEvents(ctx); quotaErr != nil && ctx.Err() == nil {
+					log.Debug("managed account quota recovery failed", "error", quotaErr)
+				}
 			}
 		}
 	}()

@@ -26,6 +26,10 @@ type ProviderAccountService interface {
 	RecoveryRequired(context.Context) (bool, error)
 }
 
+type providerAccountUsageReader interface {
+	AccountUsages(context.Context, []domain.ProviderAccount) map[string]domain.ProviderAccountUsage
+}
+
 // ProviderLoginService defines login operations available to HTTP handlers.
 type ProviderLoginService interface {
 	Start(context.Context, string, string) (ports.ProviderLogin, error)
@@ -42,6 +46,7 @@ type ProviderAccountsController struct {
 // Register registers account management and session assignment routes.
 func (c *ProviderAccountsController) Register(r chi.Router) {
 	r.Get("/provider-accounts", c.list)
+	r.Patch("/provider-accounts/quota-auto-switch", c.setQuotaAutoSwitch)
 	r.Post("/provider-accounts/login", c.startLogin)
 	r.Get("/provider-accounts/login/{loginId}", c.loginStatus)
 	r.Delete("/provider-accounts/login/{loginId}", c.cancelLogin)
@@ -63,6 +68,8 @@ func accountAPIError(err error) error {
 		return apierr.Conflict("PROVIDER_ACCOUNT_IN_USE", ports.ErrProviderAccountBusy.Error(), nil)
 	case errors.Is(err, ports.ErrProviderPrimaryRequired):
 		return apierr.Conflict("PROVIDER_PRIMARY_REQUIRED", ports.ErrProviderPrimaryRequired.Error(), nil)
+	case errors.Is(err, ports.ErrProviderQuotaSwitchRequiresReplacement):
+		return apierr.Conflict("QUOTA_AUTO_SWITCH_REQUIRES_SECOND_ACCOUNT", ports.ErrProviderQuotaSwitchRequiresReplacement.Error(), nil)
 	case errors.Is(err, ports.ErrProviderAccountUnknown):
 		return apierr.NotFound("PROVIDER_ACCOUNT_NOT_FOUND", ports.ErrProviderAccountUnknown.Error())
 	case errors.Is(err, ports.ErrProviderLoginRequired):
@@ -91,6 +98,18 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 		return
 	}
 	result := ProviderAccountsResponse{Accounts: []ProviderAccountView{}, Defaults: []ProviderPrimaryView{}}
+	if mode, ok := c.Svc.(interface{ CodexRequestSwitching() bool }); ok {
+		result.CodexRequestSwitching = mode.CodexRequestSwitching()
+	}
+	if mode, ok := c.Svc.(interface {
+		CodexQuotaAutoSwitch(context.Context) (bool, error)
+	}); ok {
+		result.CodexQuotaAutoSwitch, err = mode.CodexQuotaAutoSwitch(r.Context())
+		if err != nil {
+			envelope.WriteError(w, r, accountAPIError(err))
+			return
+		}
+	}
 	pending, err := c.Svc.RecoveryRequired(r.Context())
 	if err != nil {
 		envelope.WriteError(w, r, err)
@@ -101,12 +120,19 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 	for _, p := range state.Primaries {
 		primaries[p.Provider] = p.PrimaryID
 	}
+	usageByAccount := map[string]domain.ProviderAccountUsage{}
+	if reader, ok := c.Svc.(providerAccountUsageReader); ok {
+		usageByAccount = reader.AccountUsages(r.Context(), state.Accounts)
+	}
 	for _, provider := range []string{"codex", "claude"} {
 		id, managed := primaries[provider]
 		result.Defaults = append(result.Defaults, ProviderPrimaryView{Provider: provider, PrimaryID: id, Managed: managed})
 	}
 	for _, a := range state.Accounts {
-		view := ProviderAccountView{ID: a.ID, Provider: a.Provider, Email: a.Email, SignedIn: a.CredentialRef != "", Primary: primaries[a.Provider] == a.ID, Sessions: []string{}}
+		view := ProviderAccountView{ID: a.ID, Provider: a.Provider, Email: a.Email, Kind: a.Kind, SignedIn: a.CredentialRef != "", Primary: primaries[a.Provider] == a.ID, Sessions: []string{}}
+		if usage, ok := usageByAccount[a.ID]; ok {
+			view.Usage = providerAccountUsageView(usage)
+		}
 		for _, route := range state.Routes {
 			if route.AccountID == a.ID {
 				view.Sessions = append(view.Sessions, string(route.SessionID))
@@ -115,6 +141,40 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 		result.Accounts = append(result.Accounts, view)
 	}
 	envelope.WriteJSON(w, 200, result)
+}
+
+func providerAccountUsageView(usage domain.ProviderAccountUsage) *ProviderAccountUsageView {
+	view := &ProviderAccountUsageView{Status: usage.Status, Plan: usage.Plan, CheckedAt: usage.CheckedAt, Message: usage.Message}
+	if usage.Windows != nil {
+		view.Windows = make([]ProviderAccountUsageWindowView, 0, len(usage.Windows))
+		for _, window := range usage.Windows {
+			view.Windows = append(view.Windows, ProviderAccountUsageWindowView{Name: window.Name, RemainingFraction: window.RemainingFraction, ResetTime: window.ResetTime})
+		}
+	}
+	return view
+}
+
+func (c *ProviderAccountsController) setQuotaAutoSwitch(w http.ResponseWriter, r *http.Request) {
+	if !c.ready(w, r) {
+		return
+	}
+	setter, ok := c.Svc.(interface {
+		SetCodexQuotaAutoSwitch(context.Context, bool) error
+	})
+	if !ok {
+		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "service_unavailable", "PROVIDER_ACCOUNTS_UNAVAILABLE", "Quota switching is unavailable in this build", nil)
+		return
+	}
+	var input UpdateCodexQuotaAutoSwitchRequest
+	if err := decodeAccountJSON(r, &input); err != nil || input.Enabled == nil {
+		envelope.WriteError(w, r, apierr.Invalid("QUOTA_AUTO_SWITCH_INVALID", "enabled must be true or false", nil))
+		return
+	}
+	if err := setter.SetCodexQuotaAutoSwitch(r.Context(), *input.Enabled); err != nil {
+		envelope.WriteError(w, r, accountAPIError(err))
+		return
+	}
+	c.list(w, r)
 }
 func (c *ProviderAccountsController) setPrimary(w http.ResponseWriter, r *http.Request) {
 	if !c.ready(w, r) {
@@ -176,7 +236,7 @@ func (c *ProviderAccountsController) switchAccount(w http.ResponseWriter, r *htt
 	c.sessionAccount(w, r)
 }
 func loginView(login ports.ProviderLogin) ProviderLoginResponse {
-	return ProviderLoginResponse{ID: login.ID, Provider: login.Provider, URL: login.URL, Status: login.Status, AccountID: login.AccountID}
+	return ProviderLoginResponse{ID: login.ID, Provider: login.Provider, Mode: login.Mode, URL: login.URL, Code: login.Code, ExpiresIn: login.ExpiresIn, Status: login.Status, AccountID: login.AccountID}
 }
 func (c *ProviderAccountsController) loginReady(w http.ResponseWriter, r *http.Request) bool {
 	if !c.ready(w, r) {
@@ -197,7 +257,43 @@ func (c *ProviderAccountsController) startLogin(w http.ResponseWriter, r *http.R
 		envelope.WriteError(w, r, apierr.Invalid("PROVIDER_REQUIRED", "Choose Codex or Claude", nil))
 		return
 	}
-	login, err := c.Login.Start(r.Context(), input.Provider, input.AccountID)
+	mode := strings.TrimSpace(input.Mode)
+	if mode == "" {
+		mode = "browser"
+	}
+	switch mode {
+	case "browser":
+	case "device":
+		if input.Provider != "codex" {
+			envelope.WriteError(w, r, apierr.Invalid("LOGIN_MODE_UNSUPPORTED", "Device login is available for Codex only", nil))
+			return
+		}
+	case "import":
+		if strings.TrimSpace(input.CredentialJSON) == "" {
+			envelope.WriteError(w, r, apierr.Invalid("CREDENTIAL_JSON_REQUIRED", "Paste or choose a credential JSON file", nil))
+			return
+		}
+	case "api_key":
+		if strings.TrimSpace(input.APIKey) == "" || strings.TrimSpace(input.BaseURL) == "" {
+			envelope.WriteError(w, r, apierr.Invalid("API_KEY_FIELDS_REQUIRED", "API key and base URL are required", nil))
+			return
+		}
+	default:
+		envelope.WriteError(w, r, apierr.Invalid("LOGIN_MODE_UNSUPPORTED", "Choose browser, device, API key, or JSON import", nil))
+		return
+	}
+	var login ports.ProviderLogin
+	var err error
+	if mode == "browser" {
+		login, err = c.Login.Start(r.Context(), input.Provider, input.AccountID)
+	} else if modes, ok := c.Login.(interface {
+		StartRequest(context.Context, string, string, string, ports.ProviderLoginInput) (ports.ProviderLogin, error)
+	}); ok {
+		login, err = modes.StartRequest(r.Context(), input.Provider, input.AccountID, mode, ports.ProviderLoginInput{APIKey: input.APIKey, BaseURL: input.BaseURL, Label: input.Label, CredentialJSON: input.CredentialJSON})
+	} else {
+		envelope.WriteError(w, r, apierr.Invalid("LOGIN_MODE_UNSUPPORTED", "This login method is unavailable in this build", nil))
+		return
+	}
 	if err != nil {
 		envelope.WriteError(w, r, accountAPIError(err))
 		return

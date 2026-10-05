@@ -157,8 +157,11 @@ func schemaName(_ reflect.Type, defaultName string) string {
 //nolint:gosec // Public OpenAPI type names include reset-credit contracts; no credential value is stored here.
 var schemaNames = map[string]string{
 	"ControllersProviderAccountView":                       "ProviderAccountView",
+	"ControllersProviderAccountUsageWindowView":            "ProviderAccountUsageWindowView",
+	"ControllersProviderAccountUsageView":                  "ProviderAccountUsageView",
 	"ControllersProviderPrimaryView":                       "ProviderPrimaryView",
 	"ControllersProviderAccountsResponse":                  "ProviderAccountsResponse",
+	"ControllersUpdateCodexQuotaAutoSwitchRequest":         "UpdateCodexQuotaAutoSwitchRequest",
 	"ControllersProviderAccountChangeRequest":              "ProviderAccountChangeRequest",
 	"ControllersProviderLoginRequest":                      "ProviderLoginRequest",
 	"ControllersProviderLoginResponse":                     "ProviderLoginResponse",
@@ -2902,6 +2905,7 @@ func providerAccountOperations() []operation {
 	routeResponses := []respUnit{{http.StatusOK, controllers.SessionProviderAccountResponse{}}, {http.StatusBadRequest, envelope.APIError{}}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusConflict, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}}
 	return []operation{
 		{method: http.MethodGet, path: "/api/v1/provider-accounts", id: "listProviderAccounts", tag: "agents", summary: "List local managed accounts and separate provider primaries", resps: success},
+		{method: http.MethodPatch, path: "/api/v1/provider-accounts/quota-auto-switch", id: "setCodexQuotaAutoSwitch", tag: "agents", summary: "Enable or disable automatic Codex quota primary switching", reqBody: controllers.UpdateCodexQuotaAutoSwitchRequest{}, resps: success},
 		{method: http.MethodPost, path: "/api/v1/provider-accounts/login", id: "startProviderAccountLogin", tag: "agents", summary: "Start a local managed account sign-in", reqBody: controllers.ProviderLoginRequest{}, resps: loginResponses},
 		{method: http.MethodGet, path: "/api/v1/provider-accounts/login/{loginId}", id: "getProviderAccountLogin", tag: "agents", summary: "Verify login and register its account", pathParams: login, resps: loginResponses},
 		{method: http.MethodDelete, path: "/api/v1/provider-accounts/login/{loginId}", id: "cancelProviderAccountLogin", tag: "agents", summary: "Cancel a pending managed login", pathParams: login, resps: []respUnit{{http.StatusNoContent, nil}, {http.StatusServiceUnavailable, envelope.APIError{}}}},

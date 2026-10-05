@@ -41,6 +41,7 @@ func (c *Client) StartAccountLogin(ctx context.Context, provider, id string) (po
 	}
 	login.ID = id
 	login.Provider = provider
+	login.Mode = "browser"
 	login.Status = "waiting"
 	if login.State == "" || login.URL == "" {
 		_ = listener.Close()
@@ -76,6 +77,13 @@ func closeRelay(root, id string) {
 
 // AccountLoginStatus polls upstream completion and releases terminal callback listeners.
 func (c *Client) AccountLoginStatus(ctx context.Context, login ports.ProviderLogin) (string, error) {
+	if login.Mode != "" && login.Mode != "browser" {
+		var result ports.ProviderLogin
+		if err := c.call(ctx, http.MethodGet, "/ao/login/status?id="+queryEscape(login.ID), nil, &result, nil); err != nil {
+			return "", err
+		}
+		return result.Status, nil
+	}
 	var result struct {
 		Status string `json:"status"`
 		Error  string `json:"error"`
@@ -98,6 +106,9 @@ func (c *Client) AccountLoginStatus(ctx context.Context, login ports.ProviderLog
 
 // CancelAccountLogin cancels upstream login and closes its callback listener.
 func (c *Client) CancelAccountLogin(ctx context.Context, login ports.ProviderLogin) error {
+	if login.Mode != "" && login.Mode != "browser" {
+		return c.call(ctx, http.MethodDelete, "/ao/login/status?id="+queryEscape(login.ID), nil, nil, nil)
+	}
 	err := c.Management(ctx, http.MethodDelete, "oauth/session?state="+queryEscape(login.State), nil, nil, "")
 	closeRelay(c.root, login.ID)
 	return err
@@ -108,4 +119,33 @@ func (c *Client) VerifiedAccountLogin(ctx context.Context, id string) (ports.Ver
 	var result ports.VerifiedProviderLogin
 	err := c.LoginResult(ctx, id, &result)
 	return result, err
+}
+
+// StartAccountLoginMode forwards credentials only over the private helper channel.
+func (c *Client) StartAccountLoginMode(ctx context.Context, provider, id, mode string, input ports.ProviderLoginInput) (ports.ProviderLogin, error) {
+	path := ""
+	body := map[string]string{"id": id, "provider": provider}
+	switch mode {
+	case "device":
+		if provider != "codex" {
+			return ports.ProviderLogin{}, ports.ErrProviderAccountIncompatible
+		}
+		path = "/ao/login/device/start"
+	case "import":
+		path = "/ao/login/import"
+		body["credential_json"] = input.CredentialJSON
+	case "api_key":
+		path = "/ao/api-key"
+		body["api_key"] = input.APIKey
+		body["base_url"] = input.BaseURL
+		body["label"] = input.Label
+	default:
+		return ports.ProviderLogin{}, ports.ErrProviderAccountIncompatible
+	}
+	if err := c.Ensure(ctx); err != nil {
+		return ports.ProviderLogin{}, err
+	}
+	var login ports.ProviderLogin
+	err := c.call(ctx, http.MethodPost, path, body, &login, nil)
+	return login, err
 }

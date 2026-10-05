@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +21,26 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"gopkg.in/yaml.v3"
 )
+
+func TestBuildRepairsEmptyCredentialInFlightDefaults(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.yaml")
+	if err := os.WriteFile(path, []byte("credential-in-flight:\n  snapshot-interval: \"\"\n  stale-after: \"\"\n  max-part-bytes: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	routes := testRoutes(t)
+	_, err := Build(root, 39001, strings.Repeat("c", 32), strings.Repeat("i", 32), routes)
+	if err != nil {
+		t.Fatalf("Build rejected a legacy config with an empty optional block: %v", err)
+	}
+	repaired, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(repaired), "snapshot-interval: 2s") {
+		t.Fatalf("credential-in-flight defaults were not persisted: %s", repaired)
+	}
+}
 
 func TestSDKServiceStartupRetainsExactSelector(t *testing.T) {
 	root := t.TempDir()

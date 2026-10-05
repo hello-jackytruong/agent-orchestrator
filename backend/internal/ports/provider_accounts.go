@@ -25,6 +25,10 @@ var ErrProviderAccountBusy = errors.New("sessions are using this account; wait u
 // ErrProviderPrimaryRequired requires a replacement before removing a usable primary.
 var ErrProviderPrimaryRequired = errors.New("choose a replacement primary account first")
 
+// ErrProviderQuotaSwitchRequiresReplacement prevents enabling automatic quota
+// recovery without a second signed-in Codex account to receive new requests.
+var ErrProviderQuotaSwitchRequiresReplacement = errors.New("automatic quota switching requires a second signed-in Codex account")
+
 // ErrProviderAccountUnknown reports an account absent from the catalogue.
 var ErrProviderAccountUnknown = errors.New("provider account not found")
 
@@ -44,8 +48,19 @@ type ProviderAccountStore interface {
 
 // ProviderRouteSnapshot is the complete revisioned helper routing table.
 type ProviderRouteSnapshot struct {
-	Revision int64           `json:"revision"`
-	Routes   []ProviderRoute `json:"routes"`
+	Revision               int64           `json:"revision"`
+	Routes                 []ProviderRoute `json:"routes"`
+	AuthIDs                []string        `json:"auth_ids,omitempty"`
+	RequestBoundary        bool            `json:"request_boundary,omitempty"`
+	CodexPrimaryGeneration int64           `json:"codex_primary_generation,omitempty"`
+}
+
+// ProviderQuotaEvent reports a provider-confirmed account usage limit.
+type ProviderQuotaEvent struct {
+	ID         string `json:"id"`
+	AuthID     string `json:"auth_id"`
+	ResetAt    int64  `json:"reset_at,omitempty"`
+	Generation int64  `json:"generation,omitempty"`
 }
 
 // ProviderRoute contains a ticket hash and an exact upstream account identity.
@@ -60,6 +75,20 @@ type ProviderRoute struct {
 type ProviderAccountProxy interface {
 	ApplyRoutes(context.Context, ProviderRouteSnapshot) error
 	DeleteCredential(context.Context, string) error
+}
+
+// ProviderAccountUsageProxy reads safe, provider-normalized quota summaries.
+// It is optional so older helper implementations can still manage accounts.
+type ProviderAccountUsageProxy interface {
+	FetchAccountUsage(context.Context, string, string, string) (domain.ProviderAccountUsage, error)
+}
+
+// ProviderQuotaEvents is the optional helper capability used for automatic
+// primary recovery. Keeping it separate preserves compatibility with older
+// proxy fakes and helper protocol implementations.
+type ProviderQuotaEvents interface {
+	QuotaEvents(context.Context) ([]ProviderQuotaEvent, error)
+	AckQuotaEvents(context.Context, []string) error
 }
 
 // ProviderAccountSessionGuard fences affected sessions while their account mappings change.
@@ -79,16 +108,29 @@ type ProviderAccountRouting interface {
 type ProviderLogin struct {
 	ID        string `json:"id"`
 	Provider  string `json:"provider"`
+	Mode      string `json:"mode,omitempty"`
 	State     string `json:"state"`
 	URL       string `json:"url"`
+	Code      string `json:"code,omitempty"`
+	ExpiresIn int    `json:"expires_in,omitempty"`
 	Status    string `json:"status"`
 	AccountID string `json:"account_id"`
+}
+
+// ProviderLoginInput carries one non-browser credential input to the private
+// helper. CredentialJSON and APIKey never leave the daemon/helper boundary.
+type ProviderLoginInput struct {
+	APIKey         string
+	BaseURL        string
+	Label          string
+	CredentialJSON string
 }
 
 // VerifiedProviderLogin contains identity obtained from the successful upstream credential.
 type VerifiedProviderLogin struct {
 	Provider      string `json:"provider"`
 	Email         string `json:"email"`
+	Kind          string `json:"kind,omitempty"`
 	CredentialRef string `json:"credential_ref"`
 	AuthID        string `json:"auth_id"`
 }
@@ -99,4 +141,10 @@ type ProviderAccountLoginProxy interface {
 	AccountLoginStatus(context.Context, ProviderLogin) (string, error)
 	CancelAccountLogin(context.Context, ProviderLogin) error
 	VerifiedAccountLogin(context.Context, string) (VerifiedProviderLogin, error)
+}
+
+// ProviderAccountLoginModes is the optional extension used by the account
+// panel for device login, credential-file import, and API-key accounts.
+type ProviderAccountLoginModes interface {
+	StartAccountLoginMode(context.Context, string, string, string, ProviderLoginInput) (ProviderLogin, error)
 }

@@ -186,6 +186,34 @@ func TestProviderAccountsHTTPFlowPrimaryPreferenceAndManualSessionSwitch(t *test
 		t.Fatal("HTTP operations retained account guards")
 	}
 }
+
+func TestProviderAccountsHTTPFlowQuotaAutoSwitchPreference(t *testing.T) {
+	f := newAccountHTTPFlow(t)
+	f.add(t, "codex", "alice@example.test")
+	f.add(t, "codex", "bob@example.test")
+	result := f.catalogue(t)
+	if result.CodexQuotaAutoSwitch {
+		t.Fatal("quota auto-switch should default off")
+	}
+	body := `{"enabled":true}`
+	out := accountHTTPRequest(t, f.controller, http.MethodPatch, "/provider-accounts/quota-auto-switch", body)
+	if out.Code != http.StatusOK {
+		t.Fatalf("enable status=%d body=%s", out.Code, out.Body.String())
+	}
+	result = f.catalogue(t)
+	if !result.CodexQuotaAutoSwitch {
+		t.Fatal("quota auto-switch did not persist")
+	}
+}
+
+func TestProviderAccountsHTTPFlowQuotaAutoSwitchRequiresSecondAccount(t *testing.T) {
+	f := newAccountHTTPFlow(t)
+	f.add(t, "codex", "alice@example.test")
+	out := accountHTTPRequest(t, f.controller, http.MethodPatch, "/provider-accounts/quota-auto-switch", `{"enabled":true}`)
+	if out.Code != http.StatusConflict || !strings.Contains(out.Body.String(), "QUOTA_AUTO_SWITCH_REQUIRES_SECOND_ACCOUNT") {
+		t.Fatalf("single-account enable status=%d body=%s", out.Code, out.Body.String())
+	}
+}
 func TestProviderAccountsHTTPFlowPrimarySignOutRequiresReplacement(t *testing.T) {
 	f := newAccountHTTPFlow(t)
 	alice := f.add(t, "codex", "alice@example.test")

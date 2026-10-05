@@ -61,6 +61,7 @@ export function setApiDaemonStatus(nextStatus: DaemonStatus): void {
 // would miss (orchestrators/{id}). Keep in sync with schema.ts.
 const ROUTE_TEMPLATES = [
 	"/api/v1/provider-accounts",
+	"/api/v1/provider-accounts/quota-auto-switch",
 	"/api/v1/provider-accounts/login",
 	"/api/v1/provider-accounts/login/{loginId}",
 	"/api/v1/provider-accounts/{accountId}",

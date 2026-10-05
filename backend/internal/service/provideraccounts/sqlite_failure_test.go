@@ -302,3 +302,65 @@ func TestAccountSQLBusyRefusalWithFailedAbortRequiresRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestRequestBoundarySQLRecoveryKeepsPersistedAdmissionWhileNativeSessionBusy(t *testing.T) {
+	for _, operation := range []string{"primary", "individual"} {
+		for _, boundary := range []string{"save", "commit", "finish"} {
+			t.Run(operation+"/"+boundary, func(t *testing.T) {
+				h := newAccountWireHarness(t)
+				a := h.login(t, "codex", "a@example.test", "")
+				b := h.login(t, "codex", "b@example.test", "")
+				env := h.assign(t, "s", domain.HarnessCodex, a)
+				h.svc.EnableCodexRequestSwitching()
+				h.guard.busy["s"] = true
+				disable := failAccountSQLBoundary(t, h, boundary)
+				var err error
+				if operation == "primary" {
+					err = h.svc.SetPrimary(h.ctx, b)
+				} else {
+					err = h.svc.Switch(h.ctx, "s", b)
+				}
+				if err == nil {
+					t.Fatal("interrupted SQL boundary reported success")
+				}
+				state, pending, err := h.store.LoadProviderAccountState(h.ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if boundary == "save" {
+					if pending != nil {
+						t.Fatal("failed admission published an intent")
+					}
+					h.assertAssignment(t, "s", a, env)
+				} else if pending == nil || !pending.RequestBoundary || pending.Next.Revision < state.Revision {
+					t.Fatal("database lost admitted request-boundary mode")
+				}
+				disable()
+				h.restartDaemon(t)
+				if h.svc.CodexRequestSwitching() {
+					t.Fatal("restart unexpectedly inherited experimental flag")
+				}
+				h.guard.busy["s"] = true
+				guardsBefore := len(h.guard.acquired)
+				if err := h.svc.Recover(h.ctx); err != nil {
+					t.Fatal(err)
+				}
+				if len(h.guard.acquired) != guardsBefore {
+					t.Fatal("recovery reinterpreted admitted rebind as idle-only")
+				}
+				want := b
+				if boundary == "save" {
+					want = a
+				}
+				h.assertAssignment(t, "s", want, env)
+				_, pending, err = h.store.LoadProviderAccountState(h.ctx)
+				if err != nil || pending != nil {
+					t.Fatal("recovery left unresolved journal", err)
+				}
+				if err = h.svc.RestoreHost(h.ctx); err != nil {
+					t.Fatal("normalized replay failed", err)
+				}
+			})
+		}
+	}
+}
