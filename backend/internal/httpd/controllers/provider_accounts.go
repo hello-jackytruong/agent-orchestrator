@@ -26,6 +26,10 @@ type ProviderAccountService interface {
 	RecoveryRequired(context.Context) (bool, error)
 }
 
+type providerPrimaryOptions interface {
+	SetPrimaryWithOptions(context.Context, string, bool) error
+}
+
 type providerAccountUsageReader interface {
 	AccountUsages(context.Context, []domain.ProviderAccount) map[string]domain.ProviderAccountUsage
 }
@@ -98,9 +102,6 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 		return
 	}
 	result := ProviderAccountsResponse{Accounts: []ProviderAccountView{}, Defaults: []ProviderPrimaryView{}}
-	if mode, ok := c.Svc.(interface{ CodexRequestSwitching() bool }); ok {
-		result.CodexRequestSwitching = mode.CodexRequestSwitching()
-	}
 	if mode, ok := c.Svc.(interface {
 		CodexQuotaAutoSwitch(context.Context) (bool, error)
 	}); ok {
@@ -180,7 +181,24 @@ func (c *ProviderAccountsController) setPrimary(w http.ResponseWriter, r *http.R
 	if !c.ready(w, r) {
 		return
 	}
-	if err := c.Svc.SetPrimary(r.Context(), chi.URLParam(r, "accountId")); err != nil {
+	var input ProviderAccountChangeRequest
+	if r.ContentLength != 0 {
+		if err := decodeAccountJSON(r, &input); err != nil {
+			envelope.WriteError(w, r, apierr.Invalid("INVALID_JSON", "Invalid account change request", nil))
+			return
+		}
+	}
+	var err error
+	if input.MoveExisting != nil {
+		if setter, ok := c.Svc.(providerPrimaryOptions); ok {
+			err = setter.SetPrimaryWithOptions(r.Context(), chi.URLParam(r, "accountId"), *input.MoveExisting)
+		} else {
+			err = apierr.Invalid("PROVIDER_ACCOUNTS_UNAVAILABLE", "Account default options are unavailable in this build", nil)
+		}
+	} else {
+		err = c.Svc.SetPrimary(r.Context(), chi.URLParam(r, "accountId"))
+	}
+	if err != nil {
 		envelope.WriteError(w, r, accountAPIError(err))
 		return
 	}

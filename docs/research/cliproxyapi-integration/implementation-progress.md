@@ -85,7 +85,7 @@ Final cleanup restored both Codex sign-ins with A primary and all nine managed r
 
 ## Codex request-boundary experiment — 4 October 2026
 
-Committed the previous implementation locally as `909987581` before changing behavior. The new experiment remains uncommitted for separate review and is enabled only by `AO_CODEX_REQUEST_ACCOUNT_SWITCHING=1` at daemon startup. Codex primary A→B now moves all managed routes currently on A (including explicit A choices) for the next HTTP request; individual Codex switches also work while busy. Accepted requests and internal SDK retries retain their selected account. Claude and disabled-mode behavior stay at the checkpoint.
+Codex request-boundary routing is now automatic; the startup switch was removed. When a default changes, the Account Manager asks whether to affect new sessions only or move existing Codex routes for their next request. Individual Codex switches also work while busy. Accepted requests and internal SDK retries retain their selected account. Claude keeps its idle-only behavior.
 
 The implementation adds the signed-in auth inventory to private route snapshots and outstanding account leases to the helper, retaining safe sign-out/removal after a session has moved. Durable intent records preserve the original admission mode across recovery; helper protocol 2 rejects incompatible running helpers. Old route files can bootstrap their initial inventory without changing routes or revision. See [the verification record](request-switching-verification.md) for mechanics, test cases, failures and evidence boundaries.
 
@@ -93,9 +93,9 @@ Validation passed sequentially: affected backend race suites; full helper race s
 
 Actual Electron tests used only disposable `scratch-9`, GPT-5.5 Low, the existing profile/data and two existing Chrome sign-ins. Primary switching during a tool turn, individual switching during approval wait and continuation after A compaction on B all succeeded with local selected-auth evidence and unchanged conversation/controller identities. Denial cancelled its command and turn by existing Codex behavior; the next explicit message used the switched account. No live quota exhaustion/provider outage was induced; unchanged previous missing-target evidence and new SDK failure-after-rebind regressions are distinguished from live cases.
 
-Added authored code in the experiment: 97 production and 801 test lines, excluding generated/static/dependency artifacts, comments and blanks. Whole branch versus `ec1c6122a`: **3,029 production / 13,364 test lines (4.41:1)**; this is a net increase of 66 production lines over the checkpoint, because some additions replace previous implementation lines.
+The request-boundary change keeps the authored production/test accounting unchanged apart from replacing the startup-gated behavior with the explicit default-change choice. Generated/static/dependency artifacts, comments and blanks remain excluded from the effective count.
 
-Cleanup restored the actual starting catalogue exactly: Codex B primary/signed in with nine routes, A retained/signed out with zero, Claude unchanged. All 42 native conversation identities/termination facts were preserved. The existing Electron app is running its original normal dev sources/binaries with the same data/profile, no experimental/debug flags, no port 9337 and no temporary selector tracing. The new experiment is ready for its separate architecture/failure-case review, not enabled by default or published.
+Cleanup restored the actual starting catalogue exactly: Codex B default/signed in with nine routes, A retained/signed out with zero, Claude unchanged. All 42 native conversation identities/termination facts were preserved. The existing Electron app is running its original normal dev sources/binaries with the same data/profile, no experimental/debug flags, no port 9337 and no temporary selector tracing. The request-boundary behavior is automatic; this change is ready for review and has not been published.
 
 ## Codex quota primary recovery — 4 October 2026
 

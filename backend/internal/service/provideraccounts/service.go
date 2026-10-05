@@ -19,16 +19,15 @@ import (
 
 // Service owns managed provider defaults, session assignments, and mutation recovery.
 type Service struct {
-	store                 ports.ProviderAccountStore
-	proxy                 ports.ProviderAccountProxy
-	guard                 ports.ProviderAccountSessionGuard
-	codexRequestSwitching bool
-	gate                  chan struct{}
-	ticketKey             []byte
-	endpoint              string
-	newID                 func() string
-	usageMu               sync.Mutex
-	usageCache            map[string]cachedUsage
+	store      ports.ProviderAccountStore
+	proxy      ports.ProviderAccountProxy
+	guard      ports.ProviderAccountSessionGuard
+	gate       chan struct{}
+	ticketKey  []byte
+	endpoint   string
+	newID      func() string
+	usageMu    sync.Mutex
+	usageCache map[string]cachedUsage
 }
 
 type cachedUsage struct {
@@ -37,10 +36,6 @@ type cachedUsage struct {
 }
 
 const providerUsageCacheTTL = 2 * time.Minute
-
-// EnableCodexRequestSwitching is a startup-only opt-in pending live continuity verification.
-func (s *Service) EnableCodexRequestSwitching() { s.codexRequestSwitching = true }
-func (s *Service) CodexRequestSwitching() bool  { return s.codexRequestSwitching }
 
 // CodexQuotaAutoSwitch reports whether confirmed Codex quota exhaustion may
 // move the current primary to another signed-in account.
@@ -462,7 +457,7 @@ func (s *Service) mutateWithBoundary(ctx context.Context, requestBoundary bool, 
 		return err
 	}
 	after := snapshot(state)
-	requestBoundary = requestBoundary || (s.codexRequestSwitching && deletion == "")
+	requestBoundary = requestBoundary || deletion == ""
 	affected := mutationSessions(before, after, requestBoundary)
 	if len(affected) > 0 {
 		if s.guard == nil {
@@ -551,8 +546,16 @@ func (s *Service) RecordCredential(ctx context.Context, verified ports.VerifiedP
 	return id, err
 }
 
-// SetPrimary changes the default and optionally rebinds previous-primary Codex routes.
+// SetPrimary changes the default for new sessions. Call SetPrimaryWithOptions
+// when the caller explicitly chooses to move existing Codex routes too.
 func (s *Service) SetPrimary(ctx context.Context, id string) error {
+	return s.SetPrimaryWithOptions(ctx, id, false)
+}
+
+// SetPrimaryWithOptions changes the default and optionally rebinds routes that
+// still point at the previous Codex default. Rebinding is applied at the next
+// request boundary, so an in-flight request keeps its current credentials.
+func (s *Service) SetPrimaryWithOptions(ctx context.Context, id string, moveExisting bool) error {
 	return s.mutate(ctx, func(state *domain.ProviderAccountState) (string, error) {
 		a, ok := account(*state, id)
 		if !ok {
@@ -561,8 +564,11 @@ func (s *Service) SetPrimary(ctx context.Context, id string) error {
 		if err := eligible(*state, id, a.Provider); err != nil {
 			return "", err
 		}
-		if s.codexRequestSwitching && a.Provider == "codex" {
-			previous, _ := primary(*state, a.Provider)
+		previous, _ := primary(*state, a.Provider)
+		if moveExisting && a.Provider != "codex" {
+			return "", ports.ErrProviderAccountIncompatible
+		}
+		if moveExisting && previous != "" {
 			for i, r := range state.Routes {
 				if r.Provider == a.Provider && r.AccountID == previous {
 					state.Routes[i].AccountID = id
@@ -595,7 +601,7 @@ func (s *Service) AssignAccount(ctx context.Context, id domain.SessionID, harnes
 	})
 }
 
-// Switch retains the ticket; opt-in Codex rebinds apply at the next request.
+// Switch retains the ticket; Codex rebinds apply at the next request.
 func (s *Service) Switch(ctx context.Context, id domain.SessionID, target string) error {
 	return s.mutate(ctx, func(state *domain.ProviderAccountState) (string, error) {
 		for i, r := range state.Routes {

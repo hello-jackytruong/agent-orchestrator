@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderAccountsSection } from "./ProviderAccountsSection";
 import type { ProviderAccount, ProviderAccounts } from "../../hooks/useProviderAccounts";
 
-const mock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), remove: vi.fn(), open: vi.fn() }));
+const mock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), remove: vi.fn(), open: vi.fn(), clipboard: vi.fn() }));
 vi.mock("../../lib/api-client", () => ({ apiClient: { GET: mock.get, POST: mock.post, PUT: mock.put, PATCH: mock.patch, DELETE: mock.remove }, apiErrorMessage: (error: { message: string }) => error.message }));
-vi.mock("../../lib/bridge", () => ({ aoBridge: { app: { openExternal: mock.open } } }));
+vi.mock("../../lib/bridge", () => ({ aoBridge: { app: { openExternal: mock.open }, clipboard: { writeText: mock.clipboard } } }));
 let inventory: ProviderAccounts;
 function renderAccounts() {
 	const cache = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -15,7 +15,7 @@ function renderAccounts() {
 	return cache;
 }
 function accountRow(email: string) {
-	return screen.getByText(email).parentElement!.parentElement!;
+	return screen.getByText(email).closest<HTMLElement>('[data-testid^="provider-account-"]')!;
 }
 const alice: ProviderAccount = { id: "a", provider: "codex", email: "alice@example.test", signedIn: true, primary: true, sessions: ["session-a"] };
 const bob: ProviderAccount = { id: "b", provider: "codex", email: "bob@example.test", signedIn: true, primary: false, sessions: ["session-b", "session-c"] };
@@ -29,6 +29,7 @@ beforeEach(() => {
 	mock.patch.mockResolvedValue({ data: { ...inventory, codexQuotaAutoSwitch: true } });
 	mock.remove.mockResolvedValue({ data: inventory });
 	mock.open.mockResolvedValue(undefined);
+	mock.clipboard.mockResolvedValue(undefined);
 });
 afterEach(cleanup);
 
@@ -38,48 +39,74 @@ describe("provider account inventory", () => {
 		await screen.findByText(alice.email);
 		expect(screen.getByRole("heading", { name: "Codex" })).toBeInTheDocument();
 		expect(screen.getByRole("heading", { name: "Claude" })).toBeInTheDocument();
-		expect(within(accountRow(alice.email)).getByText("Primary · 1 sessions")).toBeInTheDocument();
+		expect(within(accountRow(alice.email)).getByText("Default · 1 sessions")).toBeInTheDocument();
 		expect(within(accountRow(bob.email)).getByText("Signed in · 2 sessions")).toBeInTheDocument();
-		expect(within(accountRow(clara.email)).getByText("Primary · 0 sessions")).toBeInTheDocument();
-		expect(within(accountRow(alice.email)).queryByRole("button", { name: "Make primary" })).toBeNull();
-		expect(screen.getByText(/Existing sessions keep their account/)).toBeInTheDocument();
+		expect(within(accountRow(clara.email)).getByText("Default · 0 sessions")).toBeInTheDocument();
+		expect(within(accountRow(alice.email)).queryByRole("button", { name: "Use as default" })).toBeNull();
+		expect(within(accountRow(alice.email)).getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+		expect(within(accountRow(alice.email)).queryByRole("button", { name: "Remove" })).toBeNull();
+		expect(screen.getByText(/choose whether it affects new sessions only/)).toBeInTheDocument();
 	});
 	it("shows provider usage without changing account controls", async () => {
 		inventory.accounts[0].usage = { status: "available", plan: "Pro", windows: [{ name: "5 hour", remainingFraction: 0.75, resetTime: "2030-01-01T00:00:00Z" }] };
 		inventory.accounts[1].usage = { status: "unavailable", message: "Usage unavailable" };
+		inventory.accounts[2].usage = { status: "available", plan: "Claude Pro", windows: [{ name: "5 hour", remainingFraction: 0.75, resetTime: "2030-01-01T00:00:00Z" }, { name: "Weekly", remainingFraction: 0.4, resetTime: "2030-01-07T00:00:00Z" }] };
 		renderAccounts();
 		await screen.findByText(alice.email);
-		expect(screen.getByTestId("provider-account-usage-a")).toHaveTextContent("Pro · 75% remaining · resets 2030-01-01T00:00:00Z");
+		expect(screen.getByTestId("provider-account-usage-a")).toHaveTextContent(/Pro · 75% remaining · resets Jan 1/);
+		expect(screen.getByTestId("provider-account-usage-a")).not.toHaveTextContent("GMT");
 		expect(screen.getByTestId("provider-account-usage-b")).toHaveTextContent("Usage unavailable");
+		expect(screen.getByTestId("provider-account-usage-c")).toHaveTextContent(/Claude Pro · 75% remaining/);
+		expect(screen.getByTestId("provider-account-usage-c-1")).toHaveTextContent(/40% remaining/);
+		expect(screen.getAllByRole("progressbar", { name: /clara@example.test/ })).toHaveLength(2);
 	});
-	it("changes only the selected provider primary and explains existing sessions", async () => {
+	it("collapses and reopens a provider section from its header", async () => {
+		const user = userEvent.setup();
+		renderAccounts();
+		await screen.findByText(alice.email);
+		const header = screen.getByRole("button", { name: /Codex.*2 signed in/ });
+		const content = screen.getByTestId("provider-section-codex").querySelector("[id='provider-content-codex']")!;
+		expect(header).toHaveAttribute("aria-expanded", "true");
+		await user.click(header);
+		expect(header).toHaveAttribute("aria-expanded", "false");
+		expect(content).toHaveAttribute("hidden");
+		await user.click(header);
+		expect(header).toHaveAttribute("aria-expanded", "true");
+		expect(content).not.toHaveAttribute("hidden");
+	});
+	it("asks whether a default change affects new or existing Codex sessions", async () => {
 		const user = userEvent.setup();
 		renderAccounts();
 		await screen.findByText(bob.email);
-		await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Make primary" }));
-		expect(mock.put).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/primary", { params: { path: { accountId: "b" } } });
-		expect(await screen.findByRole("status")).toHaveTextContent("Primary changed. Existing sessions keep their account.");
+		await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Use as default" }));
+		const confirm = screen.getByRole("group", { name: "Confirm default change" });
+		expect(mock.put).not.toHaveBeenCalled();
+		await user.click(within(confirm).getByRole("button", { name: "New sessions only" }));
+		expect(mock.put).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/primary", { params: { path: { accountId: "b" } }, body: { moveExisting: false } });
+		expect(await screen.findByRole("status")).toHaveTextContent("Default changed. Existing sessions keep their account.");
+		expect(within(accountRow(bob.email)).queryByRole("group", { name: "Confirm default change" })).toBeNull();
 		expect(mock.post).not.toHaveBeenCalled();
 		expect(mock.remove).not.toHaveBeenCalled();
 	});
 	it("keeps the catalogue when primary change is refused", async () => {
 		mock.put.mockResolvedValue({ error: { message: "Account is signed out" } });
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(bob.email);
-		await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Make primary" }));
+		await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Use as default" }));
+		await user.click(within(screen.getByRole("group", { name: "Confirm default change" })).getByRole("button", { name: "New sessions only" }));
 		expect(await screen.findByRole("status")).toHaveTextContent("Account is signed out");
 		expect(screen.getByText(alice.email)).toBeInTheDocument();
 	});
 	it("allows Codex quota auto-switching to be enabled", async () => {
 		const user = userEvent.setup();
 		renderAccounts();
-		const toggle = await screen.findByRole("checkbox", { name: /Automatically switch the Codex primary/ });
+		const toggle = await screen.findByRole("checkbox", { name: /Automatically switch the Codex default/ });
 		await user.click(toggle);
 		expect(mock.patch).toHaveBeenCalledWith("/api/v1/provider-accounts/quota-auto-switch", { body: { enabled: true } });
 	});
 	it("keeps quota auto-switch visible but disabled until a second Codex account is signed in", async () => {
 		inventory.accounts = [structuredClone(alice), structuredClone(clara)];
 		renderAccounts();
-		const toggle = await screen.findByRole("checkbox", { name: /Automatically switch the Codex primary/ });
+		const toggle = await screen.findByRole("checkbox", { name: /Automatically switch the Codex default/ });
 		expect(toggle).toBeDisabled();
 		expect(screen.getByRole("img", { name: "Sign in to a second Codex account to enable automatic switching." })).toBeInTheDocument();
 		expect(mock.patch).not.toHaveBeenCalled();
@@ -90,8 +117,10 @@ describe("provider account inventory", () => {
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(bob.email);
 		const row = within(accountRow(bob.email));
 		expect(row.getByText("Signed out · 0 sessions")).toBeInTheDocument();
-		expect(row.queryByRole("button", { name: "Make primary" })).toBeNull();
+		expect(row.queryByRole("button", { name: "Use as default" })).toBeNull();
 		expect(row.queryByRole("button", { name: "Sign out" })).toBeNull();
+		expect(row.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+		expect(row.getByRole("button", { name: "Remove" })).toHaveAttribute("title", "Remove");
 		await user.click(row.getByRole("button", { name: "Sign in again" }));
 		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex", accountId: "b" } });
 		expect(mock.open).toHaveBeenCalledWith("https://provider.test/login");
@@ -100,8 +129,10 @@ describe("provider account inventory", () => {
 		inventory.accounts = [];
 		inventory.defaults[1].managed = false;
 		renderAccounts();
-		expect(await screen.findByText(/No signed-in Codex account/)).toHaveTextContent("Managed sessions need you to sign in again.");
-		expect(screen.getByText(/No signed-in Claude account/)).toHaveTextContent("Existing device sessions continue using their device account.");
+		await screen.findByText(/No signed-in Codex account/);
+		expect(screen.getByText("Managed sessions need you to sign in again.")).toBeInTheDocument();
+		await screen.findByText(/No signed-in Claude account/);
+		expect(screen.getByText("Existing device sessions continue using their device account.")).toBeInTheDocument();
 	});
 	it("renders recovery instructions without hiding the inventory", async () => {
 		inventory.recoveryRequired = true;
@@ -111,13 +142,14 @@ describe("provider account inventory", () => {
 	});
 });
 
-describe("account sign-out and removal", () => {
+	describe("account sign-out and removal", () => {
 	it("requires choosing another primary before confirming removal", async () => {
+		inventory.accounts[0] = { ...alice, signedIn: false };
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(alice.email);
 		await user.click(within(accountRow(alice.email)).getByRole("button", { name: "Remove" }));
 		const confirm = screen.getByRole("group", { name: "Confirm account change" });
 		expect(within(confirm).getByRole("button", { name: "Confirm" })).toBeDisabled();
-		const select = within(confirm).getByRole("combobox", { name: "Replacement primary account" });
+		const select = within(confirm).getByRole("combobox", { name: "Replacement default account" });
 		expect(within(select).getAllByRole("option").map(o => o.textContent)).toEqual(["Choose an account", bob.email]);
 		await user.selectOptions(select, "b");
 		await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
@@ -125,25 +157,32 @@ describe("account sign-out and removal", () => {
 		expect(await screen.findByRole("status")).toHaveTextContent("Account updated");
 	});
 	it("signs out a secondary after explaining how its sessions move", async () => {
+		mock.post.mockResolvedValue({ data: { ...inventory, accounts: inventory.accounts.map(account => account.id === "b" ? { ...account, signedIn: false, sessions: [] } : account) } });
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(bob.email);
 		await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Sign out" }));
 		const confirm = screen.getByRole("group", { name: "Confirm account change" });
-		expect(within(confirm).getByText(/Its sessions will use the primary account/)).toHaveTextContent("If any are busy, wait until they are idle and retry.");
+		expect(within(screen.getByTestId("provider-section-codex")).getByRole("group", { name: "Confirm account change" })).toBe(confirm);
+		expect(within(confirm).getByText(/Its sessions will use the default account/)).toHaveTextContent("If any are busy, wait until they are idle and retry.");
 		expect(within(confirm).queryByRole("combobox")).toBeNull();
 		await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
 		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/sign-out", { params: { path: { accountId: "b" } }, body: { replacementPrimaryId: undefined } });
 		expect(mock.remove).not.toHaveBeenCalled();
+		const row = within(accountRow(bob.email));
+		expect(row.getByRole("button", { name: "Sign in again" })).toBeInTheDocument();
+		expect(row.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+		expect(row.queryByRole("button", { name: "Sign out" })).toBeNull();
 	});
 	it("explains last-account login requirements and recovery before removing", async () => {
-		inventory.accounts = [structuredClone(clara)];
+		inventory.accounts = [{ ...structuredClone(clara), signedIn: false }];
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(clara.email);
 		await user.click(within(accountRow(clara.email)).getByRole("button", { name: "Remove" }));
 		const confirm = screen.getByRole("group", { name: "Confirm account change" });
-		expect(within(confirm).getByText(/With no account left/)).toHaveTextContent("The next sign-in becomes primary and restores those waiting sessions.");
+		expect(within(confirm).getByText(/With no account left/)).toHaveTextContent("The next sign-in becomes the default and restores those waiting sessions.");
 		expect(within(confirm).queryByRole("combobox")).toBeNull();
 		expect(within(confirm).getByRole("button", { name: "Confirm" })).toBeEnabled();
 	});
 	it("cancelling an account removal performs no destructive request", async () => {
+		inventory.accounts[1] = { ...bob, signedIn: false };
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(bob.email);
 		await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Remove" }));
 		await user.click(within(screen.getByRole("group", { name: "Confirm account change" })).getByRole("button", { name: "Cancel" }));
@@ -152,6 +191,7 @@ describe("account sign-out and removal", () => {
 	});
 	it("keeps the confirmation and account after a busy-session refusal", async () => {
 		mock.remove.mockResolvedValue({ error: { message: "Some sessions are busy. Wait until idle." } });
+		inventory.accounts[1] = { ...bob, signedIn: false };
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(bob.email);
 		await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Remove" }));
 		await user.click(within(screen.getByRole("group", { name: "Confirm account change" })).getByRole("button", { name: "Confirm" }));
@@ -168,8 +208,11 @@ describe("provider browser login", () => {
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
 		await user.click(screen.getByRole("button", { name: "Browser" }));
 		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex" } });
-		expect(await screen.findByText("Complete sign-in in your browser.")).toBeInTheDocument();
+		const group = screen.getByRole("group", { name: "codex sign-in methods" });
+		expect(await within(group).findByText("Complete sign-in in your browser.")).toBeInTheDocument();
 		expect(screen.getAllByRole("button", { name: "Add account" }).every(b => (b as HTMLButtonElement).disabled)).toBe(true);
+		await user.click(within(group).getByRole("button", { name: "Copy link" }));
+		expect(mock.clipboard).toHaveBeenCalledWith("https://provider.test/login");
 		await user.click(screen.getByRole("button", { name: "Open sign-in" }));
 		expect(mock.open).toHaveBeenCalledTimes(2);
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -320,7 +363,7 @@ describe("catalogue and confirmation failure boundaries", () => {
 		await screen.findByText(alice.email);
 		await user.click(within(accountRow(alice.email)).getByRole("button", { name: "Sign out" }));
 		expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
-		await user.selectOptions(screen.getByRole("combobox", { name: "Replacement primary account" }), "b");
+		await user.selectOptions(screen.getByRole("combobox", { name: "Replacement default account" }), "b");
 		await user.click(screen.getByRole("button", { name: "Confirm" }));
 		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/sign-out", { params: { path: { accountId: "a" } }, body: { replacementPrimaryId: "b" } });
 		expect(mock.remove).not.toHaveBeenCalled();
@@ -329,6 +372,7 @@ describe("catalogue and confirmation failure boundaries", () => {
 	});
 	it("keeps the catalogue and confirmation on credential deletion failure", async () => {
 		mock.remove.mockResolvedValue({ error: { message: "Credential cleanup failed. Retry the operation." } });
+		inventory.accounts[1] = { ...bob, signedIn: false };
 		const user = userEvent.setup();
 		renderAccounts();
 		await screen.findByText(bob.email);
@@ -343,6 +387,7 @@ describe("catalogue and confirmation failure boundaries", () => {
 	it("prevents duplicate destructive requests while one is pending", async () => {
 		let resolve!: (value: { data: ProviderAccounts }) => void;
 		mock.remove.mockImplementation(() => new Promise<{ data: ProviderAccounts }>(done => { resolve = done; }));
+		inventory.accounts[1] = { ...bob, signedIn: false };
 		const user = userEvent.setup();
 		renderAccounts();
 		await screen.findByText(bob.email);
@@ -396,17 +441,25 @@ describe("additional CLIProxy credential methods", () => {
 		expect(within(group).getByRole("button", { name: "Device code" })).toBeInTheDocument();
 		expect(within(group).getByRole("button", { name: "API key" })).toBeInTheDocument();
 		expect(within(group).getByLabelText("Import JSON")).toBeInTheDocument();
+		expect(within(group).getByRole("button", { name: "Close" })).toBeInTheDocument();
+		await user.click(within(group).getByRole("button", { name: "Close" }));
+		expect(screen.queryByRole("group", { name: "codex sign-in methods" })).toBeNull();
 	});
-	it("starts Codex device login and keeps its code visible without opening an empty URL", async () => {
-		mock.post.mockResolvedValue({ data: { id: "device-1", provider: "codex", mode: "device", code: "ABCD-EFGH", status: "waiting", accountId: "" } });
+	it("starts Codex device login, opens its page, and keeps its code visible", async () => {
+		mock.post.mockResolvedValue({ data: { id: "device-1", provider: "codex", mode: "device", code: "ABCD-EFGH", url: "https://provider.test/device", status: "waiting", accountId: "" } });
 		const user = userEvent.setup();
 		renderAccounts();
 		await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
 		await user.click(screen.getByRole("button", { name: "Device code" }));
 		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex", mode: "device" } });
-		expect(await screen.findByText(/ABCD-EFGH/)).toBeInTheDocument();
-		expect(mock.open).not.toHaveBeenCalled();
+		const group = screen.getByRole("group", { name: "codex sign-in methods" });
+		expect(await within(group).findByText(/ABCD-EFGH/)).toBeInTheDocument();
+		await user.click(within(group).getByRole("button", { name: "Copy code" }));
+		expect(mock.clipboard).toHaveBeenCalledWith("ABCD-EFGH");
+		await user.click(within(group).getByRole("button", { name: "Copy link" }));
+		expect(mock.clipboard).toHaveBeenCalledWith("https://provider.test/device");
+		expect(mock.open).toHaveBeenCalledWith("https://provider.test/device");
 	});
 	it("sends the API key and base URL through AO without rendering the key", async () => {
 		mock.post.mockResolvedValue({ data: { id: "key-1", provider: "codex", mode: "api_key", status: "waiting", accountId: "" } });
@@ -414,6 +467,7 @@ describe("additional CLIProxy credential methods", () => {
 		renderAccounts();
 		await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.click(screen.getByRole("button", { name: "API key" }));
 		await user.type(screen.getByLabelText("API key"), "secret-api-key");
 		await user.type(screen.getByRole("textbox", { name: "Base URL" }), "https://api.example.test");
 		await user.click(screen.getByRole("button", { name: "Add API key" }));
@@ -441,27 +495,30 @@ describe("additional CLIProxy credential methods", () => {
 	});
 });
 
-describe("experimental primary request switching", () => {
- it("explains the affected Codex sessions and refreshes session assignments", async () => {
-  inventory.codexRequestSwitching = true;
+describe("primary request switching", () => {
+ it("can move existing Codex sessions at the next request boundary", async () => {
   const user = userEvent.setup();
   const cache = renderAccounts();
   const invalidate = vi.spyOn(cache, "invalidateQueries");
   await screen.findByText(bob.email);
-  expect(screen.getByText(/Codex primary changes move sessions using the previous primary/)).toBeInTheDocument();
-  await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Make primary" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("Primary changed. Codex sessions using the previous primary will use this account for their next API request.");
+  expect(screen.getByText(/choose whether it affects new sessions only/)).toBeInTheDocument();
+  await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Use as default" }));
+	  await user.click(within(screen.getByRole("group", { name: "Confirm default change" })).getByRole("button", { name: "Move existing sessions" }));
+  expect(mock.put).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/primary", { params: { path: { accountId: "b" } }, body: { moveExisting: true } });
+  expect(await screen.findByRole("status")).toHaveTextContent("Default changed. Codex sessions using the previous default will use this account for their next API request.");
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["session-provider-account"] });
   expect(mock.post).not.toHaveBeenCalled();
   expect(mock.remove).not.toHaveBeenCalled();
  });
- it("keeps Claude primary semantics unchanged in the Codex experiment", async () => {
-  inventory.codexRequestSwitching = true;
+ it("offers only new sessions for Claude defaults", async () => {
   inventory.accounts.push({ ...clara, id: "d", email: "claude-two@test.example", primary: false });
   const user = userEvent.setup();
   renderAccounts();
   await screen.findByText("claude-two@test.example");
-  await user.click(within(accountRow("claude-two@test.example")).getByRole("button", { name: "Make primary" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("Primary changed. Existing sessions keep their account.");
+  await user.click(within(accountRow("claude-two@test.example")).getByRole("button", { name: "Use as default" }));
+	  const confirm = screen.getByRole("group", { name: "Confirm default change" });
+	  expect(within(confirm).queryByRole("button", { name: "Move existing sessions" })).toBeNull();
+	  await user.click(within(confirm).getByRole("button", { name: "New sessions only" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Default changed. Existing sessions keep their account.");
  });
 });

@@ -103,17 +103,13 @@ func TestAccountHostRestorePreservesInterruptedMutationUntilIdleRecoveryIsPossib
 	}
 	h.proxy.fail = ""
 	h.guard.busy["s"] = true
-	applicationsBefore := len(h.proxy.applied)
-	if err := h.svc.RestoreHost(h.ctx); !errors.Is(err, ports.ErrProviderAccountBusy) {
-		t.Fatalf("busy recovery error=%v", err)
+	if err := h.svc.RestoreHost(h.ctx); err != nil {
+		t.Fatalf("request-boundary recovery error=%v", err)
 	}
-	if len(h.proxy.applied) != applicationsBefore {
-		t.Fatal("maintenance bypassed idle proof for an interrupted account change")
-	}
-	h.route(t, "s", alice)
+	h.route(t, "s", bob)
 	required, err := h.svc.RecoveryRequired(h.ctx)
-	if err != nil || !required {
-		t.Fatal("busy maintenance discarded the admitted account operation")
+	if err != nil || required {
+		t.Fatal("request-boundary recovery left an unresolved account operation")
 	}
 	h.guard.busy["s"] = false
 	if err := h.svc.RestoreHost(h.ctx); err != nil {

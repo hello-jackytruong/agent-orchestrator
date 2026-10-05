@@ -591,9 +591,6 @@ func Run() error {
 		return errors.New("session manager lacks managed account boundaries")
 	}
 	providerAccounts := provideraccountsvc.New(store, client, guard, key, client.Endpoint(), uuid.NewString)
-	if os.Getenv("AO_CODEX_REQUEST_ACCOUNT_SWITCHING") == "1" {
-		providerAccounts.EnableCodexRequestSwitching()
-	}
 	providerLogin := provideraccountsvc.NewLoginCoordinator(providerAccounts, client, uuid.NewString)
 	routing.SetProviderAccounts(providerAccounts)
 	sessionSvc.SetProviderAccounts(providerAccounts)

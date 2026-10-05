@@ -1,8 +1,8 @@
 # Codex request-boundary account switching
 
-Checkpoint: `909987581` preserves the reviewed idle-only implementation. This experiment is opt-in with `AO_CODEX_REQUEST_ACCOUNT_SWITCHING=1` on the daemon; Claude keeps its previous behavior. The flag must be enabled before constructing the account service, never toggled on a live service.
+Codex request-boundary switching is now part of the normal account service. There is no startup flag. When a user changes a default, AO records whether the change is for new sessions only or should also move existing Codex routes for their next request; Claude keeps its idle-only behavior.
 
-Changing Codex primary A to B reassigns every managed Codex route currently on A, including explicit selections. Routes on other accounts remain unchanged. An individual switch only changes its selected session. Already admitted requests and their internal SDK retries keep the account captured at admission; later HTTP requests, including client-generated retries, use the current route. No agent restart, approval cancellation, command replay, or removal of encrypted context is part of this change.
+When the user chooses “move existing sessions,” changing Codex default A to B reassigns every managed Codex route currently on A, including explicit A selections. The “new sessions only” choice changes only the default. Routes on other accounts remain unchanged. An individual switch only changes its selected session. Already admitted requests and their internal SDK retries keep the account captured at admission; later HTTP requests, including client-generated retries, use the current route. No agent restart, approval cancellation, command replay, or removal of encrypted context is part of this change.
 
 The helper must retain in-flight counts by account as well as session: after A→B, an unfinished A request must still prevent A's removal. Routing snapshots include the signed-in auth inventory so credential retirement is refused before AO commits removal. Recovery must retain the original request-boundary admission decision in the durable mutation journal. Helper protocol compatibility must fail closed.
 
@@ -26,8 +26,8 @@ flowchart LR
 | Request/switch race | Each admitted request uses one complete old/new mapping; no mixed credentials | Passed — sequential automated regressions |
 | Rapid A→B→C | Latest acknowledged mapping wins; outstanding leases retain their original account | Passed — sequential automated regressions |
 | Persistence failure | Failed save publishes nothing; lost acknowledgement/commit/finish recover exact intent | Passed — sequential automated regressions |
-| Opt-in compatibility | Disabled flag retains checkpoint behavior; old helpers are rejected | Passed — sequential automated regressions |
-| UI explanation | Enabled Codex says next request; Claude and disabled mode retain idle/default wording | Passed — sequential automated regressions |
+| Default-change choice | New-sessions-only leaves old routes in place; move-existing rebinds previous-default Codex routes | Passed — sequential automated regressions |
+| UI explanation | Codex always says next request; Claude retains idle/default wording | Passed — sequential automated regressions |
 | Live response/tool workflow | Same conversation, actual A/B upstream identity, GPT-5.5 Low | Passed — A→B during a real tool turn |
 | Live approval wait | Approval preserved; denied harmless tool never executes; next request uses new account | Passed — B→A preserved the same approval; denial cancelled the turn; follow-up used A |
 | Live compacted context | Switch after real compaction; context/tool continuation intact | Passed — compaction on A, continuation on B |
@@ -76,4 +76,4 @@ Local screenshot: `/tmp/ao-request-switch-compaction.png` (actual Electron conve
 
 The local checkpoint is committed; experimental source/tests remain uncommitted for separate review. The experiment has 97 authored added production lines and 801 authored added test lines. Whole-branch effective authored additions versus `ec1c6122a` are 3,029 production / 13,364 tests (4.41:1), a net increase of 66 production lines over the checkpoint. Generated DTOs, dependency records, static translations, comments and blanks are excluded consistently.
 
-Review the per-account leases and retirement inventory together, bootstrap/replay rules, durable admission mode and UI capability advertising. Keep the flag off by default until this changed scope has been reviewed. The existing app has been restored to normal checkpoint behavior for the user; the experiment can be reproduced through the documented startup flag using the new source and helper protocol 2.
+Review the per-account leases and retirement inventory together, bootstrap/replay rules, durable admission mode and the user-selected default-change scope. The existing app uses the automatic request-boundary behavior; no environment setting is required.

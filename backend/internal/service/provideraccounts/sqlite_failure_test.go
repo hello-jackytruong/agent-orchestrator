@@ -311,7 +311,7 @@ func TestRequestBoundarySQLRecoveryKeepsPersistedAdmissionWhileNativeSessionBusy
 				a := h.login(t, "codex", "a@example.test", "")
 				b := h.login(t, "codex", "b@example.test", "")
 				env := h.assign(t, "s", domain.HarnessCodex, a)
-				h.svc.EnableCodexRequestSwitching()
+
 				h.guard.busy["s"] = true
 				disable := failAccountSQLBoundary(t, h, boundary)
 				var err error
@@ -337,9 +337,6 @@ func TestRequestBoundarySQLRecoveryKeepsPersistedAdmissionWhileNativeSessionBusy
 				}
 				disable()
 				h.restartDaemon(t)
-				if h.svc.CodexRequestSwitching() {
-					t.Fatal("restart unexpectedly inherited experimental flag")
-				}
 				h.guard.busy["s"] = true
 				guardsBefore := len(h.guard.acquired)
 				if err := h.svc.Recover(h.ctx); err != nil {

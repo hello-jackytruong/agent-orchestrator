@@ -22,11 +22,12 @@ export async function setCodexQuotaAutoSwitch(enabled: boolean): Promise<Provide
 	if (result.error) throw new Error(apiErrorMessage(result.error));
 	return result.data!;
 }
-export async function changeProviderAccount(accountId: string, action: "primary" | "sign-out" | "remove", replacementPrimaryId?: string): Promise<ProviderAccounts> {
+export async function changeProviderAccount(accountId: string, action: "primary" | "sign-out" | "remove", replacementPrimaryId?: string, moveExisting?: boolean): Promise<ProviderAccounts> {
 	const params = { path: { accountId } };
 	const body = { replacementPrimaryId };
+	const primaryOptions = moveExisting === undefined ? { params } : { params, body: { moveExisting } };
 	const result = action === "primary"
-		? await apiClient.PUT("/api/v1/provider-accounts/{accountId}/primary", { params })
+		? await apiClient.PUT("/api/v1/provider-accounts/{accountId}/primary", primaryOptions)
 		: action === "sign-out"
 			? await apiClient.POST("/api/v1/provider-accounts/{accountId}/sign-out", { params, body })
 			: await apiClient.DELETE("/api/v1/provider-accounts/{accountId}", { params, body });

@@ -3373,6 +3373,11 @@ paths:
         required: true
         schema:
           type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderAccountChangeRequest'
       responses:
         "200":
           content:
@@ -3404,7 +3409,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Service Unavailable
-      summary: Set the default for new sessions only
+      summary: Set the default and optionally move existing Codex sessions
       tags:
       - agents
   /api/v1/provider-accounts/{accountId}/sign-out:
@@ -13160,6 +13165,10 @@ components:
       properties:
         accountId:
           type: string
+        moveExisting:
+          type:
+          - "null"
+          - boolean
         replacementPrimaryId:
           type: string
       type: object
@@ -13238,8 +13247,6 @@ components:
             $ref: '#/components/schemas/ProviderAccountView'
           type: array
         codexQuotaAutoSwitch:
-          type: boolean
-        codexRequestSwitching:
           type: boolean
         defaults:
           items:

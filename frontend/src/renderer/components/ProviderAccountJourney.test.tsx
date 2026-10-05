@@ -19,7 +19,7 @@ let accounts: ProviderAccounts;
 let sessions: Record<string, SessionRoute>;
 let busy: boolean;
 let login: ProviderLogin;
-type PathOptions = { params?: { path?: { sessionId?: string; accountId?: string; loginId?: string } }; body?: { accountId?: string; replacementPrimaryId?: string; provider?: string } };
+type PathOptions = { params?: { path?: { sessionId?: string; accountId?: string; loginId?: string } }; body?: { accountId?: string; replacementPrimaryId?: string; provider?: string; moveExisting?: boolean } };
 
 function markPrimary(id: string) {
 	const selected = accounts.accounts.find(account => account.id === id)!;
@@ -96,8 +96,21 @@ beforeEach(() => {
 		sessionCounts();
 		return { data: structuredClone(accounts) };
 	});
-	api.post.mockImplementation(async (path: string) => {
+	api.post.mockImplementation(async (path: string, options?: PathOptions) => {
 		if (path === "/api/v1/provider-accounts/login") return { data: structuredClone(login) };
+		if (path === "/api/v1/provider-accounts/{accountId}/sign-out") {
+			const accountId = options?.params?.path?.accountId;
+			const account = accounts.accounts.find(candidate => candidate.id === accountId)!;
+			account.signedIn = false;
+			for (const route of Object.values(sessions)) {
+				if (route.accountId === accountId) {
+					route.accountId = accounts.defaults.find(entry => entry.provider === account.provider)?.primaryId ?? "";
+					route.loginRequired = !route.accountId;
+				}
+			}
+			sessionCounts();
+			return { data: structuredClone(accounts) };
+		}
 		throw new Error(`Unexpected post: ${path}`);
 	});
 	api.open.mockResolvedValue(undefined);
@@ -120,7 +133,7 @@ function catalogue() {
 	return within(screen.getByRole("region", { name: "Account catalogue" }));
 }
 function row(email: string) {
-	return within(catalogue().getByText(email).parentElement!.parentElement!);
+	return within(catalogue().getByText(email).closest<HTMLElement>('[data-testid^="provider-account-"]')!);
 }
 function picker(session: string) {
 	return within(screen.getByRole("region", { name: session })).getByRole("combobox", { name: "Session account" });
@@ -134,15 +147,17 @@ describe("account settings and live session controls together", () => {
 		await waitFor(() => expect(picker("First session")).toHaveValue("alice"));
 		expect(picker("Second session")).toHaveValue("bob");
 		expect(picker("Claude session")).toHaveValue("clara");
-		await user.click(row("bob@example.test").getByRole("button", { name: "Make primary" }));
-		await waitFor(() => expect(row("bob@example.test").getByText("Primary · 1 sessions")).toBeInTheDocument());
+		await user.click(row("bob@example.test").getByRole("button", { name: "Use as default" }));
+		const primaryChange = within(screen.getByRole("group", { name: "Confirm default change" }));
+		await user.click(primaryChange.getByRole("button", { name: "New sessions only" }));
+		await waitFor(() => expect(row("bob@example.test").getByText("Default · 1 sessions")).toBeInTheDocument());
 		expect(picker("First session")).toHaveValue("alice");
 		expect(picker("Second session")).toHaveValue("bob");
 		expect(picker("Claude session")).toHaveValue("clara");
 		expect(accounts.defaults.find(entry => entry.provider === "codex")?.primaryId).toBe("bob");
 		expect(accounts.defaults.find(entry => entry.provider === "claude")?.primaryId).toBe("clara");
 		expect(api.put).toHaveBeenCalledTimes(1);
-		expect(api.put).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/primary", { params: { path: { accountId: "bob" } } });
+		expect(api.put).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/primary", { params: { path: { accountId: "bob" } }, body: { moveExisting: false } });
 		expect(api.remove).not.toHaveBeenCalled();
 		expect(api.post).not.toHaveBeenCalled();
 		expect(within(screen.getByRole("region", { name: "Native session" })).queryByRole("combobox")).toBeNull();
@@ -156,7 +171,7 @@ describe("account settings and live session controls together", () => {
 		await user.selectOptions(picker("First session"), "bob");
 		await waitFor(() => expect(picker("First session")).toHaveValue("bob"));
 		await waitFor(() => expect(row("bob@example.test").getByText("Signed in · 2 sessions")).toBeInTheDocument());
-		expect(row("alice@example.test").getByText("Primary · 0 sessions")).toBeInTheDocument();
+		expect(row("alice@example.test").getByText("Default · 0 sessions")).toBeInTheDocument();
 		expect(picker("Second session")).toHaveValue("bob");
 		expect(picker("Claude session")).toHaveValue("clara");
 		expect(accounts.defaults[0].primaryId).toBe("alice");
@@ -190,14 +205,17 @@ describe("account settings and live session controls together", () => {
 		expect(accounts.defaults[0].primaryId).toBe("alice");
 	});
 
-	it("removes a secondary and shows affected sessions on the primary after route refresh", async () => {
+	it("signs out and removes a secondary after its sessions move to the default", async () => {
 		const user = userEvent.setup();
 		const cache = renderJourney();
 		await catalogue().findByText("bob@example.test");
 		await waitFor(() => expect(picker("Second session")).toHaveValue("bob"));
+		await user.click(row("bob@example.test").getByRole("button", { name: "Sign out" }));
+		await user.click(within(screen.getByRole("group", { name: "Confirm account change" })).getByRole("button", { name: "Confirm" }));
+		await waitFor(() => expect(row("bob@example.test").getByRole("button", { name: "Remove" })).toBeInTheDocument());
 		await user.click(row("bob@example.test").getByRole("button", { name: "Remove" }));
 		const confirmation = within(screen.getByRole("group", { name: "Confirm account change" }));
-		expect(confirmation.getByText(/Its sessions will use the primary account/)).toBeInTheDocument();
+		expect(confirmation.getByText("No sessions are currently assigned to this account.")).toBeInTheDocument();
 		expect(confirmation.queryByRole("combobox")).toBeNull();
 		await user.click(confirmation.getByRole("button", { name: "Confirm" }));
 		await waitFor(() => expect(catalogue().queryByText("bob@example.test")).toBeNull());
@@ -205,20 +223,21 @@ describe("account settings and live session controls together", () => {
 		await waitFor(() => expect(picker("Second session")).toHaveValue("alice"));
 		expect(picker("First session")).toHaveValue("alice");
 		expect(picker("Claude session")).toHaveValue("clara");
-		expect(row("alice@example.test").getByText("Primary · 2 sessions")).toBeInTheDocument();
+		expect(row("alice@example.test").getByText("Default · 2 sessions")).toBeInTheDocument();
 		expect(api.remove).toHaveBeenCalledTimes(1);
+		expect(api.post).toHaveBeenCalledTimes(1);
 		expect(api.put).not.toHaveBeenCalled();
-		expect(api.post).not.toHaveBeenCalled();
 	});
 
 	it("asks for a replacement when removing a primary and changes only its affected provider routes", async () => {
+		accounts.accounts[0] = { ...accounts.accounts[0], signedIn: false };
 		const user = userEvent.setup();
 		const cache = renderJourney();
 		await catalogue().findByText("alice@example.test");
 		await user.click(row("alice@example.test").getByRole("button", { name: "Remove" }));
 		const group = within(screen.getByRole("group", { name: "Confirm account change" }));
 		expect(group.getByRole("button", { name: "Confirm" })).toBeDisabled();
-		const choices = group.getByRole("combobox", { name: "Replacement primary account" });
+		const choices = group.getByRole("combobox", { name: "Replacement default account" });
 		expect(within(choices).getAllByRole("option").map(option => option.textContent)).toEqual(["Choose an account", "bob@example.test"]);
 		await user.selectOptions(choices, "bob");
 		await user.click(group.getByRole("button", { name: "Confirm" }));
@@ -227,7 +246,7 @@ describe("account settings and live session controls together", () => {
 		await waitFor(() => expect(picker("First session")).toHaveValue("bob"));
 		expect(picker("Second session")).toHaveValue("bob");
 		expect(picker("Claude session")).toHaveValue("clara");
-		expect(row("bob@example.test").getByText("Primary · 2 sessions")).toBeInTheDocument();
+		expect(row("bob@example.test").getByText("Default · 2 sessions")).toBeInTheDocument();
 		expect(accounts.defaults[0].primaryId).toBe("bob");
 		expect(accounts.defaults[1].primaryId).toBe("clara");
 		expect(api.remove).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}", { params: { path: { accountId: "alice" } }, body: { replacementPrimaryId: "bob" } });
@@ -235,22 +254,24 @@ describe("account settings and live session controls together", () => {
 
 	it("leaves managed sessions waiting after the last account is removed and restores them after sign-in", async () => {
 		accounts.accounts = accounts.accounts.filter(account => account.id !== "bob");
+		accounts.accounts[0] = { ...accounts.accounts[0], signedIn: false };
 		sessions.second.accountId = "alice";
 		sessionCounts();
 		const user = userEvent.setup();
 		const cache = renderJourney();
 		await catalogue().findByText("alice@example.test");
 		await user.click(row("alice@example.test").getByRole("button", { name: "Remove" }));
-		expect(screen.getByText(/With no account left/)).toHaveTextContent("The next sign-in becomes primary and restores those waiting sessions.");
+		expect(screen.getByText(/With no account left/)).toHaveTextContent("The next sign-in becomes the default and restores those waiting sessions.");
 		await user.click(screen.getByRole("button", { name: "Confirm" }));
 		await waitFor(() => expect(catalogue().queryByText("alice@example.test")).toBeNull());
 		await cache.invalidateQueries({ queryKey: ["session-provider-account"] });
 		await waitFor(() => expect(picker("First session")).toHaveValue(""));
 		expect(picker("Second session")).toHaveValue("");
-		expect(screen.getByText(/No signed-in Codex account/)).toHaveTextContent("Managed sessions need you to sign in again.");
+		expect(screen.getByText("Managed sessions need you to sign in again.")).toBeInTheDocument();
 		expect(picker("Claude session")).toHaveValue("clara");
 		expect(api.put).not.toHaveBeenCalled();
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
+		await user.click(screen.getByRole("button", { name: "Browser" }));
 		await screen.findByText("Complete sign-in in your browser.");
 		expect(api.open).toHaveBeenCalledWith("https://provider.example.test/login");
 		accounts.accounts.push({ id: "new-codex", provider: "codex", email: "new@example.test", signedIn: true, primary: true, sessions: ["first", "second"] });

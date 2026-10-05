@@ -37,7 +37,7 @@ describe("session provider account", () => {
 		renderSession();
 		const select = await screen.findByRole("combobox", { name: "Session account" });
 		await waitFor(() => expect(select.querySelectorAll("option")).toHaveLength(2));
-		expect([...select.querySelectorAll("option")].map(o => o.textContent)).toEqual(["alice@test.example (primary)", "bob@test.example"]);
+		expect([...select.querySelectorAll("option")].map(o => o.textContent)).toEqual(["alice@test.example (default)", "bob@test.example"]);
 		expect(screen.queryByRole("option", { name: "clara@test.example" })).toBeNull();
 		expect(screen.queryByRole("option", { name: "signed-out@test.example" })).toBeNull();
 	});
@@ -148,23 +148,20 @@ describe("session provider account", () => {
 	});
 });
 
-describe("experimental Codex request switching", () => {
- it.each([false, true])("shows the actual admission rule when enabled=%s", async enabled => {
-  inventory.codexRequestSwitching = enabled;
+describe("request-boundary account switching", () => {
+ it("always explains that Codex changes apply to the next request", async () => {
   renderSession();
   await screen.findByRole("combobox", { name: "Session account" });
-  expect(await screen.findByText(enabled ? "Changes apply to the next API request. Requests already running keep their account." : "Changes apply when this session is idle.")).toBeInTheDocument();
+  expect(await screen.findByText("Changes apply to the next API request. Requests already running keep their account.")).toBeInTheDocument();
  });
- it("keeps Claude idle wording when the Codex experiment is enabled", async () => {
-  inventory.codexRequestSwitching = true;
+ it("keeps Claude idle wording", async () => {
   route.provider = "claude"; route.accountId = "c";
   renderSession();
   await screen.findByRole("combobox", { name: "Session account" });
   expect(await screen.findByText("Changes apply when this session is idle.")).toBeInTheDocument();
   expect(screen.queryByText(/Changes apply to the next API request/)).toBeNull();
  });
- it("accepts a live account switch without a restart or secondary operation", async () => {
-  inventory.codexRequestSwitching = true;
+ it("accepts a live Codex account switch without a restart", async () => {
   const user = userEvent.setup();
   renderSession();
   await user.selectOptions(await screen.findByRole("combobox", { name: "Session account" }), "b");

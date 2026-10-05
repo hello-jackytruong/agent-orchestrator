@@ -1,4 +1,4 @@
-import { SessionProviderAccount } from "./SessionProviderAccount";
+import { SessionProviderAccountMenuItem } from "./SessionProviderAccountMenuItem";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe2, Loader2, PanelRight, Plus } from "lucide-react";
 import { useBlocker } from "@tanstack/react-router";
@@ -1949,6 +1949,9 @@ export function SessionView({ sessionId, cloudOrgId, projectId }: SessionViewPro
 			switchError={handoffSwitchError}
 		/>
 	) : null, [handoffAgentSwitch, handoffControlPresentation, handoffDialogOpen, handoffSwitchError, handleHandoffDialogOpenChange, session]);
+	const sessionAccountMenuItem = useMemo(() => session && !session.cloud ? (
+		<SessionProviderAccountMenuItem sessionId={session.id} />
+	) : null, [session]);
 	// Cloud sessions expose only the interface switch here; agent handoff is a
 	// local daemon feature. Hide the empty actions menu for harnesses without
 	// Chat, including when local settings identify one before transition status
@@ -1956,9 +1959,10 @@ export function SessionView({ sessionId, cloudOrgId, projectId }: SessionViewPro
 	const sessionTabActions = useMemo(() => interfaceSwitchUnsupported ? null : (
 		<SessionActionsMenu inlineStatus={interfaceSwitchInlineStatus}>
 			{interfaceSwitchMenuItem}
+			{sessionAccountMenuItem}
 			{handoffMenuItem}
 		</SessionActionsMenu>
-	), [handoffMenuItem, interfaceSwitchInlineStatus, interfaceSwitchMenuItem, interfaceSwitchUnsupported]);
+	), [handoffMenuItem, interfaceSwitchInlineStatus, interfaceSwitchMenuItem, interfaceSwitchUnsupported, sessionAccountMenuItem]);
 	const sessionHeaderActions = (
 		<div
 			className="session-topbar-session-chrome flex shrink-0 items-center"
@@ -2263,7 +2267,6 @@ export function SessionView({ sessionId, cloudOrgId, projectId }: SessionViewPro
 							className="relative z-chrome flex h-inspector-tabs w-full shrink-0 overflow-hidden"
 							data-testid="session-topbar-host"
 						/>
-						{session && !session.cloud ? <SessionProviderAccount key={session.id} sessionId={session.id} /> : null}
 						<div className="relative min-h-0 flex-1" ref={bindHandoffDialogContainer}>
 							{cloudStage === "paused_by_coder" ? <CloudPausedStatus /> : null}
 							{session && !session.cloud && handoffDialogContainer ? (

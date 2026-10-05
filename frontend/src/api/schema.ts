@@ -1269,7 +1269,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set the default for new sessions only */
+        /** Set the default and optionally move existing Codex sessions */
         put: operations["setProviderPrimary"];
         post?: never;
         delete?: never;
@@ -4518,6 +4518,7 @@ export interface components {
         };
         ProviderAccountChangeRequest: {
             accountId?: string;
+            moveExisting?: null | boolean;
             replacementPrimaryId?: string;
         };
         ProviderAccountUsageView: {
@@ -4550,7 +4551,6 @@ export interface components {
         ProviderAccountsResponse: {
             accounts: components["schemas"]["ProviderAccountView"][];
             codexQuotaAutoSwitch?: boolean;
-            codexRequestSwitching?: boolean;
             defaults: components["schemas"]["ProviderPrimaryView"][];
             recoveryRequired: boolean;
         };
@@ -9949,7 +9949,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ProviderAccountChangeRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

@@ -319,7 +319,7 @@ func TestProviderAccountManualSwitchPreservesPrimaryAndTicket(t *testing.T) {
 	if err != nil || primary != alice {
 		t.Fatalf("primary=%s err=%v", primary, err)
 	}
-	if h.guard.released != len(h.guard.acquired) || len(h.guard.acquired) != 1 {
+	if h.guard.released != len(h.guard.acquired) || len(h.guard.acquired) != 0 {
 		t.Fatalf("guard=%+v", h.guard)
 	}
 }
@@ -464,6 +464,16 @@ func TestProviderAccountBusyRemovalAndSwitchLeaveCredentialsAndRoutes(t *testing
 				err = h.svc.Switch(h.ctx, "s1", alice)
 			} else {
 				err = h.svc.Remove(h.ctx, bob, "", operation == "signout")
+			}
+			if operation == "switch" {
+				if err != nil {
+					t.Fatalf("Codex request-boundary switch err=%v", err)
+				}
+				h.route(t, "s1", alice)
+				if len(h.proxy.deleted) != 0 {
+					t.Fatal("request-boundary switch deleted credentials")
+				}
+				return
 			}
 			if !errors.Is(err, ports.ErrProviderAccountBusy) {
 				t.Fatalf("err=%v", err)

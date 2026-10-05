@@ -24,6 +24,7 @@ type accountHTTPFake struct {
 	calls             []string
 	replacement       string
 	signOut           bool
+	moveExisting      *bool
 }
 
 type usageHTTPFake struct {
@@ -40,6 +41,11 @@ func (f *accountHTTPFake) State(context.Context) (domain.ProviderAccountState, e
 }
 func (f *accountHTTPFake) SetPrimary(_ context.Context, id string) error {
 	f.calls = append(f.calls, "primary:"+id)
+	return f.err
+}
+func (f *accountHTTPFake) SetPrimaryWithOptions(_ context.Context, id string, moveExisting bool) error {
+	f.calls = append(f.calls, "primary:"+id)
+	f.moveExisting = &moveExisting
 	return f.err
 }
 func (f *accountHTTPFake) Remove(_ context.Context, id, replacement string, signOut bool) error {
@@ -306,31 +312,14 @@ func TestProviderAccountsHTTPUnavailableAlwaysReplies(t *testing.T) {
 	}
 }
 
-type requestSwitchHTTPFake struct {
-	*accountHTTPFake
-	enabled bool
-}
-
-func (f *requestSwitchHTTPFake) CodexRequestSwitching() bool { return f.enabled }
-
-func TestProviderAccountsHTTPAdvertisesOnlyEnabledRequestSwitching(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		f := &requestSwitchHTTPFake{accountHTTPFake: &accountHTTPFake{}, enabled: enabled}
-		out := accountHTTPRequest(t, &controllers.ProviderAccountsController{Svc: f}, "GET", "/provider-accounts", "")
-		if out.Code != 200 {
-			t.Fatalf("status=%d", out.Code)
-		}
-		var data map[string]json.RawMessage
-		if err := json.Unmarshal(out.Body.Bytes(), &data); err != nil {
-			t.Fatal(err)
-		}
-		capability, present := data["codexRequestSwitching"]
-		if present != enabled || (enabled && string(capability) != "true") {
-			t.Fatalf("capability=%s present=%v", capability, present)
-		}
+func TestProviderAccountsHTTPPrimaryChoiceIsForwarded(t *testing.T) {
+	f := &accountHTTPFake{}
+	out := accountHTTPRequest(t, &controllers.ProviderAccountsController{Svc: f}, "PUT", "/provider-accounts/a/primary", `{"moveExisting":true}`)
+	if out.Code != 200 || len(f.calls) != 1 || f.calls[0] != "primary:a" || f.moveExisting == nil || !*f.moveExisting {
+		t.Fatalf("status=%d calls=%v moveExisting=%v", out.Code, f.calls, f.moveExisting)
 	}
 	legacy := accountHTTPRequest(t, &controllers.ProviderAccountsController{Svc: &accountHTTPFake{}}, "GET", "/provider-accounts", "")
 	if legacy.Code != 200 || strings.Contains(legacy.Body.String(), "codexRequestSwitching") {
-		t.Fatal("old service unexpectedly advertised the experiment")
+		t.Fatal("routing capability flag leaked into inventory")
 	}
 }

@@ -19,7 +19,7 @@ Baseline: 38 durable session records. Online backup under `~/.ao/dev/data/backup
 | 11 | Make another account primary | Previously verified — Native primary change, 2 Oct |
 | 12 | Existing routes survive primary change | Previously verified — 2 Oct existing terminal stayed on A |
 | 13 | Change primary during active work | Passed — native primary B to A while scratch-9 Chat active; both B assignments and all A assignments retained |
-| 14 | Signed-out account eligibility | Passed — signed-out B has no Make primary; both existing-session and new-task selectors exclude B; new-task still shows Codex / GPT-5.5 / Low |
+| 14 | Signed-out account eligibility | Passed — signed-out B has no Use as default action; both existing-session and new-task selectors exclude B; new-task still shows Codex / GPT-5.5 / Low |
 | 15 | Reopen settings preserves primary | Passed — closed/reopened native Settings after B to A primary change; A retained primary and assignments unchanged |
 | 16 | Spawn on primary | Previously verified — 2 Oct terminal A/B inference |
 | 17 | Explicit A while B primary | Passed — native Chat creation explicitly chose A while B primary; GPT-5.5 Low replied AO_UI_A_CHAT_READY; stored route A |

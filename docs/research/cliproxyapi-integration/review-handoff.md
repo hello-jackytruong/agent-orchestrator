@@ -1,6 +1,6 @@
 # Final review handoff
 
-The idle-only checkpoint's final architecture/failure-case review has been performed; see [findings, fixes and validation](final-review.md). The new opt-in Codex request-boundary experiment is implemented and tested but needs a separate architecture/failure-case review: start with [its behavior, suite and live evidence](request-switching-verification.md). The local checkpoint commit is `909987581`; the experimental changes remain uncommitted on `codex/cliproxy-account-manager` for review. Implementation and local regression verification are recorded below. Use the [progress record](implementation-progress.md) and [live Codex verification](codex-e2e-verification.md) for checks and their limits.
+The idle-only checkpoint's final architecture/failure-case review has been performed; see [findings, fixes and validation](final-review.md). The Codex request-boundary behavior is now automatic and the Account Manager lets the user choose whether a default change affects new sessions only or existing Codex routes on their next request. The local checkpoint commit is `909987581`; the current changes remain uncommitted on `codex/cliproxy-account-manager` for review. Implementation and local regression verification are recorded below. Use the [progress record](implementation-progress.md) and [live Codex verification](codex-e2e-verification.md) for checks and their limits.
 
 ## Ownership and flow
 

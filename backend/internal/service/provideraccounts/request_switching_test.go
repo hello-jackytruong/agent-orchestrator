@@ -13,7 +13,7 @@ import (
 
 func TestRequestBoundaryPrimaryMovesOnlyPreviousCodexAccount(t *testing.T) {
 	h := setupAccounts(t)
-	h.svc.EnableCodexRequestSwitching()
+
 	a := h.login(t, "codex", "a@test.example")
 	b := h.login(t, "codex", "b@test.example")
 	c := h.login(t, "codex", "c@test.example")
@@ -25,7 +25,7 @@ func TestRequestBoundaryPrimaryMovesOnlyPreviousCodexAccount(t *testing.T) {
 	h.assign(t, "other", domain.HarnessCodex, c)
 	h.assign(t, "claude", domain.HarnessClaudeCode, claude)
 	before, _ := h.svc.State(h.ctx)
-	if err := h.svc.SetPrimary(h.ctx, b); err != nil {
+	if err := h.svc.SetPrimaryWithOptions(h.ctx, b, true); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"busy", "idle", "approval", "review-owner"} {
@@ -46,11 +46,11 @@ func TestRequestBoundaryPrimaryMovesOnlyPreviousCodexAccount(t *testing.T) {
 	if err != nil || selected != b {
 		t.Fatalf("new primary=%s err=%v", selected, err)
 	}
-	if err := h.svc.SetPrimary(h.ctx, c); err != nil {
+	if err := h.svc.SetPrimaryWithOptions(h.ctx, c, true); err != nil {
 		t.Fatal(err)
 	}
 	h.route(t, "busy", c)
-	if err := h.svc.SetPrimary(h.ctx, a); err != nil {
+	if err := h.svc.SetPrimaryWithOptions(h.ctx, a, true); err != nil {
 		t.Fatal(err)
 	}
 	h.route(t, "busy", a)
@@ -59,50 +59,45 @@ func TestRequestBoundaryPrimaryMovesOnlyPreviousCodexAccount(t *testing.T) {
 }
 
 func TestRequestBoundaryIndividualSwitchRetainsPrimaryAndClaudeProtection(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		for _, provider := range []string{"codex", "claude"} {
-			t.Run(provider+"/enabled="+map[bool]string{false: "false", true: "true"}[enabled], func(t *testing.T) {
-				h := setupAccounts(t)
-				if enabled {
-					h.svc.EnableCodexRequestSwitching()
+	for _, provider := range []string{"codex", "claude"} {
+		t.Run(provider, func(t *testing.T) {
+			h := setupAccounts(t)
+			a := h.login(t, provider, "a@test.example")
+			b := h.login(t, provider, "b@test.example")
+			harness := domain.HarnessCodex
+			if provider == "claude" {
+				harness = domain.HarnessClaudeCode
+			}
+			h.assign(t, "working", harness, a)
+			h.assign(t, "other", harness, a)
+			h.guard.busy["working"] = true
+			env, _ := h.svc.LaunchAccountEnv(h.ctx, "working")
+			err := h.svc.Switch(h.ctx, "working", b)
+			if provider == "codex" {
+				if err != nil {
+					t.Fatal(err)
 				}
-				a := h.login(t, provider, "a@test.example")
-				b := h.login(t, provider, "b@test.example")
-				harness := domain.HarnessCodex
-				if provider == "claude" {
-					harness = domain.HarnessClaudeCode
+				h.route(t, "working", b)
+				nextEnv, _ := h.svc.LaunchAccountEnv(h.ctx, "working")
+				if !reflect.DeepEqual(env, nextEnv) {
+					t.Fatal("switch requires native restart")
 				}
-				h.assign(t, "working", harness, a)
-				h.assign(t, "other", harness, a)
-				h.guard.busy["working"] = true
-				env, _ := h.svc.LaunchAccountEnv(h.ctx, "working")
-				err := h.svc.Switch(h.ctx, "working", b)
-				if enabled && provider == "codex" {
-					if err != nil {
-						t.Fatal(err)
-					}
-					h.route(t, "working", b)
-					nextEnv, _ := h.svc.LaunchAccountEnv(h.ctx, "working")
-					if !reflect.DeepEqual(env, nextEnv) {
-						t.Fatal("switch requires native restart")
-					}
-					if err = h.svc.Remove(h.ctx, b, "", true); !errors.Is(err, ports.ErrProviderAccountBusy) {
-						t.Fatalf("sign-out bypassed native busy protection: %v", err)
-					}
-					h.route(t, "working", b)
-				} else {
-					if !errors.Is(err, ports.ErrProviderAccountBusy) {
-						t.Fatalf("idle protection=%v", err)
-					}
-					h.route(t, "working", a)
+				if err = h.svc.Remove(h.ctx, b, "", true); !errors.Is(err, ports.ErrProviderAccountBusy) {
+					t.Fatalf("sign-out bypassed native busy protection: %v", err)
 				}
-				h.route(t, "other", a)
-				selected, _, err := h.svc.ResolveAccount(h.ctx, harness, "")
-				if err != nil || selected != a {
-					t.Fatal("individual switch changed default")
+				h.route(t, "working", b)
+			} else {
+				if !errors.Is(err, ports.ErrProviderAccountBusy) {
+					t.Fatalf("idle protection=%v", err)
 				}
-			})
-		}
+				h.route(t, "working", a)
+			}
+			h.route(t, "other", a)
+			selected, _, err := h.svc.ResolveAccount(h.ctx, harness, "")
+			if err != nil || selected != a {
+				t.Fatal("individual switch changed default")
+			}
+		})
 	}
 }
 
@@ -111,7 +106,7 @@ func TestRequestBoundaryIntentRecoveryRetainsAdmissionAfterRestart(t *testing.T)
 		for _, failure := range []string{"save", "apply", "commit", "finish"} {
 			t.Run(operation+"/"+failure, func(t *testing.T) {
 				h := setupAccounts(t)
-				h.svc.EnableCodexRequestSwitching()
+
 				a := h.login(t, "codex", "a@test.example")
 				b := h.login(t, "codex", "b@test.example")
 				h.assign(t, "working", domain.HarnessCodex, a)
@@ -124,7 +119,7 @@ func TestRequestBoundaryIntentRecoveryRetainsAdmissionAfterRestart(t *testing.T)
 				}
 				var err error
 				if operation == "primary" {
-					err = h.svc.SetPrimary(h.ctx, b)
+					err = h.svc.SetPrimaryWithOptions(h.ctx, b, true)
 				} else {
 					err = h.svc.Switch(h.ctx, "working", b)
 				}
@@ -168,7 +163,7 @@ func TestRequestBoundaryIntentRecoveryRetainsAdmissionAfterRestart(t *testing.T)
 func TestRequestBoundaryRetirementBusyRefusalKeepsAccountAndClearsIntent(t *testing.T) {
 	for _, signOut := range []bool{false, true} {
 		h := setupAccounts(t)
-		h.svc.EnableCodexRequestSwitching()
+
 		a := h.login(t, "codex", "a@test.example")
 		b := h.login(t, "codex", "b@test.example")
 		h.assign(t, "working", domain.HarnessCodex, a)

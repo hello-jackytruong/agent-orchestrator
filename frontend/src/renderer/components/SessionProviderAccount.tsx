@@ -35,7 +35,7 @@ export function SessionProviderAccount({ sessionId }: { sessionId: string }) {
 		<label className="flex items-center gap-2">{t("providerAccounts.sessionLabel")}<select aria-label={t("providerAccounts.sessionLabel")} disabled={pending || !accounts.data} value={route.data.accountId} onChange={event => void switchAccount(event.target.value)}>
 			{!route.data.accountId ? <option value="">{t("providerAccounts.loginRequired")}</option> : null}
 			{accounts.data?.accounts.filter(a => a.provider === route.data?.provider && a.signedIn).map(a => <option key={a.id} value={a.id}>{a.email}{a.primary ? t("providerAccounts.primarySuffix") : ""}</option>)}
-		</select></label><span className="text-muted-foreground">{t(accounts.data?.codexRequestSwitching && route.data.provider === "codex" ? "providerAccounts.sessionNextRequest" : "providerAccounts.sessionIdle")}</span>
+		</select></label><span className="text-muted-foreground">{t(route.data.provider === "codex" ? "providerAccounts.sessionNextRequest" : "providerAccounts.sessionIdle")}</span>
 		{message?.sessionId === sessionId && message.accountId === route.data.accountId ? <span role="status">{message.text}</span> : null}
 	</div>;
 }

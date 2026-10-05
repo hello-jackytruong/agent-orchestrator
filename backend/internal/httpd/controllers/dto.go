@@ -2990,11 +2990,10 @@ type ProviderPrimaryView struct {
 
 // ProviderAccountsResponse contains the account catalogue, defaults, and recovery state.
 type ProviderAccountsResponse struct {
-	CodexRequestSwitching bool                  `json:"codexRequestSwitching,omitempty"`
-	CodexQuotaAutoSwitch  bool                  `json:"codexQuotaAutoSwitch,omitempty"`
-	Accounts              []ProviderAccountView `json:"accounts"`
-	Defaults              []ProviderPrimaryView `json:"defaults"`
-	RecoveryRequired      bool                  `json:"recoveryRequired"`
+	CodexQuotaAutoSwitch bool                  `json:"codexQuotaAutoSwitch,omitempty"`
+	Accounts             []ProviderAccountView `json:"accounts"`
+	Defaults             []ProviderPrimaryView `json:"defaults"`
+	RecoveryRequired     bool                  `json:"recoveryRequired"`
 }
 
 // UpdateCodexQuotaAutoSwitchRequest changes automatic primary recovery.
@@ -3006,6 +3005,7 @@ type UpdateCodexQuotaAutoSwitchRequest struct {
 type ProviderAccountChangeRequest struct {
 	AccountID            string `json:"accountId,omitempty"`
 	ReplacementPrimaryID string `json:"replacementPrimaryId,omitempty"`
+	MoveExisting         *bool  `json:"moveExisting,omitempty"`
 }
 
 // ForceRequestBody preserves the optional replacement-primary JSON body on DELETE in OpenAPI.

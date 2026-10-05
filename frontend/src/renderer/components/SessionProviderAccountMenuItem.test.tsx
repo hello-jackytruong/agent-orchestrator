@@ -1,0 +1,61 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionActionsMenu } from "./SessionActionsMenu";
+import { SessionProviderAccountMenuItem } from "./SessionProviderAccountMenuItem";
+
+const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
+vi.mock("../lib/api-client", () => ({
+	apiClient: { GET: api.get, PUT: api.put },
+	apiErrorMessage: (error: { message: string }) => error.message,
+}));
+
+const inventory = {
+	accounts: [
+		{ id: "alice", provider: "codex", email: "alice@example.test", signedIn: true, primary: true, sessions: ["session-1"] },
+		{ id: "bob", provider: "codex", email: "bob@example.test", signedIn: true, primary: false, sessions: [] },
+	],
+	defaults: [{ provider: "codex", primaryId: "alice", managed: true }],
+	recoveryRequired: false,
+};
+
+function renderMenu() {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return render(<QueryClientProvider client={client}><SessionActionsMenu><SessionProviderAccountMenuItem sessionId="session-1" /></SessionActionsMenu></QueryClientProvider>);
+}
+
+beforeEach(() => {
+	vi.clearAllMocks();
+	api.get.mockImplementation(async (path: string) => path === "/api/v1/provider-accounts" ? { data: inventory } : { data: { managed: true, provider: "codex", accountId: "alice", loginRequired: false } });
+	api.put.mockResolvedValue({ data: { managed: true, provider: "codex", accountId: "bob", loginRequired: false } });
+});
+afterEach(() => vi.restoreAllMocks());
+
+describe("session account actions", () => {
+	it("places account choices beside the other session actions", async () => {
+		const user = userEvent.setup();
+		renderMenu();
+		await user.click(await screen.findByRole("button", { name: "Session actions" }));
+		const switchItem = await screen.findByRole("menuitem", { name: /Switch account/ });
+		expect(switchItem).toBeInTheDocument();
+		await user.hover(switchItem);
+		await waitFor(() => expect(switchItem).toHaveAttribute("aria-expanded", "true"));
+		expect(await screen.findByRole("menuitem", { name: /bob@example.test/ })).toBeInTheDocument();
+	});
+
+	it("switches the current session from the submenu without a separate toolbar", async () => {
+		const user = userEvent.setup();
+		renderMenu();
+		await user.click(await screen.findByRole("button", { name: "Session actions" }));
+		const switchItem = await screen.findByRole("menuitem", { name: /Switch account/ });
+		await user.hover(switchItem);
+		await waitFor(() => expect(switchItem).toHaveAttribute("aria-expanded", "true"));
+		fireEvent.click(await screen.findByRole("menuitem", { name: /bob@example.test/ }));
+		await waitFor(() => expect(api.put).toHaveBeenCalledWith(
+			"/api/v1/sessions/{sessionId}/provider-account",
+			{ params: { path: { sessionId: "session-1" } }, body: { accountId: "bob" } },
+		));
+	});
+
+});
