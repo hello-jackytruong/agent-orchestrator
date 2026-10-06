@@ -2314,7 +2314,7 @@
 	"providerAccounts.confirmChange": "Confirmar cambio de cuenta",
 	"providerAccounts.confirmSignOut": "¿Cerrar la sesión de {{email}}?",
 	"providerAccounts.confirmRemove": "¿Eliminar {{email}}?",
-	"providerAccounts.affectedSessions": "Sus sesiones usarán la cuenta principal. Si alguna está trabajando, espera a que esté inactiva y vuelve a intentarlo.",
+	"providerAccounts.affectedSessions": "Las sesiones existentes que usan esta cuenta se transferirán a la cuenta predeterminada. Si alguna está ocupada, espera a que esté inactiva y vuelve a intentarlo.",
 	"providerAccounts.noSessions": "Actualmente no hay sesiones asignadas a esta cuenta.",
 	"providerAccounts.noAccountsConsequence": "Sin cuentas, las solicitudes administradas requieren que vuelvas a iniciar sesión. La próxima cuenta será la principal y restaurará las sesiones en espera.",
 	"providerAccounts.newPrimary": "Nueva principal",

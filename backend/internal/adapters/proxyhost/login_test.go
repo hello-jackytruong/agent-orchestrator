@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -375,5 +376,213 @@ func TestProviderLoginUnsupportedProviderDoesNotOpenCallbackOrCallHelper(t *test
 	}
 	if calls != 0 {
 		t.Fatalf("unsupported provider contacted helper: %d", calls)
+	}
+}
+
+func TestNativeCredentialImportUsesCLIProxyManagement(t *testing.T) {
+	calls := 0
+	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		switch r.URL.Path {
+		case "/ao/status":
+			return fakeResponse(200, `{"protocol_version":2}`), nil
+		case "/v8/management/credentials":
+			if r.Method != http.MethodPost || r.URL.Query().Get("name") != "ao-import-attempt.json" || r.Header.Get("X-AO-Login-ID") != "import-attempt" {
+				t.Fatalf("native import request=%s %s query=%s login=%q", r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("X-AO-Login-ID"))
+			}
+			var value map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&value); err != nil || value["type"] != "codex" {
+				t.Fatalf("import body=%v err=%v", value, err)
+			}
+			return fakeResponse(200, `{}`), nil
+		case "/ao/login-result/import-attempt":
+			return fakeResponse(200, `{"provider":"codex","email":"a@example.test","credential_ref":"ao-import-attempt.json","auth_id":"auth-a"}`), nil
+		default:
+			return fakeResponse(404, `{}`), nil
+		}
+	})
+	login, err := c.StartAccountLoginMode(context.Background(), "codex", "import-attempt", "import", ports.ProviderLoginInput{CredentialJSON: `{"type":"codex","email":"a@example.test","access_token":"secret"}`})
+	if err != nil || login.Status != "waiting" {
+		t.Fatalf("login=%+v err=%v", login, err)
+	}
+	status, err := c.AccountLoginStatus(context.Background(), login)
+	if err != nil || status != "complete" {
+		t.Fatalf("status=%q err=%v", status, err)
+	}
+	if calls != 3 {
+		t.Fatalf("native calls=%d, want 3", calls)
+	}
+}
+
+func TestNativeAPIKeyLoginMergesCLIProxyConfig(t *testing.T) {
+	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/ao/status":
+			return fakeResponse(200, `{"protocol_version":2}`), nil
+		case "/v0/management/codex-api-key":
+			if r.Method == http.MethodGet {
+				return fakeResponse(200, `{"codex-api-key":[{"api-key":"old","base-url":"https://old.example"}]}`), nil
+			}
+			if r.Method != http.MethodPut || r.Header.Get("X-AO-Login-ID") != "key-attempt" {
+				t.Fatalf("native key request=%s login=%q", r.Method, r.Header.Get("X-AO-Login-ID"))
+			}
+			var entries []map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&entries); err != nil || len(entries) != 2 || entries[1]["api-key"] != "new" {
+				t.Fatalf("merged keys=%v err=%v", entries, err)
+			}
+			return fakeResponse(200, `{}`), nil
+		case "/ao/tag-api-key":
+			return fakeResponse(200, `{"auth_id":"auth-key"}`), nil
+		case "/ao/login-result/key-attempt":
+			return fakeResponse(200, `{"provider":"codex","email":"Team key","credential_ref":"config-index:codex:stable","auth_id":"auth-key"}`), nil
+		default:
+			return fakeResponse(404, `{}`), nil
+		}
+	})
+	login, err := c.StartAccountLoginMode(context.Background(), "codex", "key-attempt", "api_key", ports.ProviderLoginInput{APIKey: "new", BaseURL: "https://new.example"})
+	if err != nil || login.Status != "waiting" {
+		t.Fatalf("login=%+v err=%v", login, err)
+	}
+	if status, err := c.AccountLoginStatus(context.Background(), login); err != nil || status != "complete" {
+		t.Fatalf("status=%q err=%v", status, err)
+	}
+}
+
+func TestNativeLoginModesRejectUnsafeInputsBeforeManagement(t *testing.T) {
+	calls := 0
+	c := privateClient(t, func(*http.Request) (*http.Response, error) {
+		calls++
+		return fakeResponse(200, `{"protocol_version":2}`), nil
+	})
+	cases := []struct {
+		name, provider, mode string
+		input                ports.ProviderLoginInput
+	}{
+		{"unknown-provider", "other", "api_key", ports.ProviderLoginInput{APIKey: "key", BaseURL: "https://api.example"}},
+		{"claude-device", "claude", "device", ports.ProviderLoginInput{}},
+		{"unknown-mode", "codex", "other", ports.ProviderLoginInput{}},
+		{"bad-json", "codex", "import", ports.ProviderLoginInput{CredentialJSON: "{"}},
+		{"wrong-type", "claude", "import", ports.ProviderLoginInput{CredentialJSON: `{"type":"codex"}`}},
+		{"oversized", "codex", "import", ports.ProviderLoginInput{CredentialJSON: strings.Repeat("x", 1<<20+1)}},
+		{"empty-key", "codex", "api_key", ports.ProviderLoginInput{BaseURL: "https://api.example"}},
+		{"unsafe-url", "claude", "api_key", ports.ProviderLoginInput{APIKey: "secret", BaseURL: "https://user:pass@example.test/?token=secret"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := c.StartAccountLoginMode(context.Background(), tc.provider, tc.name, tc.mode, tc.input); err == nil {
+				t.Fatal("unsafe native login input was accepted")
+			}
+		})
+	}
+	if calls != 0 {
+		t.Fatalf("invalid inputs contacted helper %d times", calls)
+	}
+}
+
+func TestNativeAPIKeyLoginRollsBackWhenAOCannotTagCredential(t *testing.T) {
+	deleted := false
+	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/ao/status":
+			return fakeResponse(200, `{"protocol_version":2}`), nil
+		case "/v0/management/codex-api-key":
+			if r.Method == http.MethodGet {
+				return fakeResponse(200, `{"codex-api-key":[]}`), nil
+			}
+			if r.Method == http.MethodDelete {
+				deleted = true
+				return fakeResponse(200, `{}`), nil
+			}
+			return fakeResponse(200, `{}`), nil
+		case "/ao/tag-api-key":
+			return fakeResponse(404, `{}`), nil
+		default:
+			return fakeResponse(404, `{}`), nil
+		}
+	})
+	if _, err := c.StartAccountLoginMode(context.Background(), "codex", "rollback", "api_key", ports.ProviderLoginInput{APIKey: "secret", BaseURL: "https://api.example"}); err == nil {
+		t.Fatal("tag failure was accepted")
+	}
+	if !deleted {
+		t.Fatal("native credential was not rolled back")
+	}
+}
+
+func TestNativeAPIKeyLoginPreservesExistingConfiguration(t *testing.T) {
+	for _, provider := range []string{"codex", "claude"} {
+		for _, existing := range []string{`null`, `[]`, `[{"api-key":"old","base-url":"https://old.example","models":[{"name":"model","alias":"alias"}],"headers":{"X-Custom":"value"},"priority":7}]`} {
+			t.Run(provider+"/"+existing, func(t *testing.T) {
+				field := provider + "-api-key"
+				var original []map[string]any
+				if err := json.Unmarshal([]byte(existing), &original); err != nil {
+					t.Fatal(err)
+				}
+				writes, tags := 0, 0
+				c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+					if r.URL.Path == "/ao/status" {
+						return fakeResponse(200, `{"protocol_version":2}`), nil
+					}
+					if r.URL.Path == "/ao/tag-api-key" {
+						tags++
+						return fakeResponse(200, `{}`), nil
+					}
+					if r.URL.Path != "/v0/management/"+field {
+						t.Fatalf("unexpected path: %s", r.URL.Path)
+					}
+					if r.Method == http.MethodGet {
+						return fakeResponse(200, `{"`+field+`":`+existing+`}`), nil
+					}
+					if r.Method != http.MethodPut {
+						t.Fatalf("unexpected method: %s", r.Method)
+					}
+					var entries []map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&entries); err != nil || len(entries) != len(original)+1 {
+						t.Fatalf("entries=%v err=%v", entries, err)
+					}
+					for i := range original {
+						if !reflect.DeepEqual(entries[i], original[i]) {
+							t.Fatalf("existing configuration changed: %v", entries[i])
+						}
+					}
+					if !reflect.DeepEqual(entries[len(original)], map[string]any{"api-key": "new", "base-url": "https://new.example"}) {
+						t.Fatalf("new key=%v", entries[len(original)])
+					}
+					writes++
+					return fakeResponse(200, `{}`), nil
+				})
+				login, err := c.StartAccountLoginMode(context.Background(), provider, "attempt", "api_key", ports.ProviderLoginInput{APIKey: "new", BaseURL: " https://new.example/ "})
+				if err != nil || writes != 1 || tags != 1 || login.Provider != provider {
+					t.Fatalf("login=%+v writes=%d tags=%d err=%v", login, writes, tags, err)
+				}
+			})
+		}
+	}
+}
+
+func TestNativeLoginStatusDistinguishesLoadingFromFailure(t *testing.T) {
+	for _, mode := range []string{"import", "api_key"} {
+		for _, tc := range []struct {
+			code       int
+			body, want string
+			wantError  bool
+		}{
+			{200, `{"auth_id":"ready"}`, "complete", false},
+			{404, `{}`, "waiting", false},
+			{500, `{}`, "", true},
+			{200, `{`, "", true},
+		} {
+			t.Run(fmt.Sprintf("%s/%d/%s", mode, tc.code, tc.body), func(t *testing.T) {
+				c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+					if r.Method != http.MethodGet || r.URL.Path != "/ao/login-result/attempt" {
+						t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+					}
+					return fakeResponse(tc.code, tc.body), nil
+				})
+				status, err := c.AccountLoginStatus(context.Background(), ports.ProviderLogin{ID: "attempt", Mode: mode})
+				if status != tc.want || (err != nil) != tc.wantError {
+					t.Fatalf("status=%q err=%v", status, err)
+				}
+			})
+		}
 	}
 }

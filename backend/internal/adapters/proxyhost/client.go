@@ -434,6 +434,27 @@ func (c *Client) FetchAccountUsage(ctx context.Context, provider, authID, creden
 
 // DeleteCredential removes an upstream credential and verifies an already missing file.
 func (c *Client) DeleteCredential(ctx context.Context, name string) error {
+	if strings.HasPrefix(name, "config-index:") {
+		// CLIProxy exposes a stable auth-index in its list response, but its
+		// delete endpoint takes the current array position. Resolve that
+		// position immediately before deleting so other key changes cannot
+		// remove the wrong credential.
+		parts := strings.SplitN(name, ":", 3)
+		if len(parts) != 3 || (parts[1] != "codex" && parts[1] != "claude") || parts[2] == "" || strings.ContainsAny(parts[2], "/\\") {
+			return errors.New("invalid API-key reference")
+		}
+		field := parts[1] + "-api-key"
+		entries, err := c.apiKeys(ctx, field)
+		if err != nil {
+			return err
+		}
+		for i, entry := range entries {
+			if entry["auth-index"] == parts[2] {
+				return c.management(ctx, http.MethodDelete, "/v0/management/"+field+"?index="+strconv.Itoa(i), nil, nil, "")
+			}
+		}
+		return nil
+	}
 	if strings.HasPrefix(name, "config:") && len(name) > len("config:") && !strings.ContainsAny(name, "/\\") {
 		if err := c.Ensure(ctx); err != nil {
 			return err
@@ -470,8 +491,18 @@ func (c *Client) DeleteCredential(ctx context.Context, name string) error {
 	return err
 }
 
-// Management is private to AO's login coordinator; raw responses never reach UI.
-func (c *Client) Management(ctx context.Context, method, path string, body, output any, loginID string) error {
+func (c *Client) apiKeys(ctx context.Context, field string) ([]map[string]any, error) {
+	var listing map[string][]map[string]any
+	err := c.management(ctx, http.MethodGet, "/v0/management/"+field, nil, &listing, "")
+	entries, ok := listing[field]
+	if err == nil && !ok {
+		err = errResponse
+	}
+	return entries, err
+}
+
+// management is private to AO's login coordinator; raw responses never reach UI.
+func (c *Client) management(ctx context.Context, method, path string, body, output any, loginID string) error {
 	if err := c.Ensure(ctx); err != nil {
 		return err
 	}
@@ -479,10 +510,5 @@ func (c *Client) Management(ctx context.Context, method, path string, body, outp
 	if loginID != "" {
 		headers["X-AO-Login-ID"] = loginID
 	}
-	return c.call(ctx, method, "/v8/management/"+path, body, output, headers)
-}
-
-// LoginResult reads the identity tagged by one successful login.
-func (c *Client) LoginResult(ctx context.Context, id string, output any) error {
-	return c.call(ctx, http.MethodGet, "/ao/login-result/"+queryEscape(id), nil, output, nil)
+	return c.call(ctx, method, path, body, output, headers)
 }

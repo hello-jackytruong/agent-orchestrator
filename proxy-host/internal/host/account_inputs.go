@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,17 +37,17 @@ type loginOperation struct {
 	cancel    context.CancelFunc
 }
 
-// LoginInputs extends the SDK's browser flow with private credential inputs.
-// The config file is the source of truth; SDK watchers own runtime loading.
-// No API keys or token JSON are returned by these operations.
+// LoginInputs contains only the small device-code adapter; native imports and
+// API keys are handled by CLIProxy's management endpoints.
 type LoginInputs struct {
-	mu                  sync.Mutex
-	configMu            sync.Mutex
-	configPath, authDir string
-	auth                *coreauth.Manager
-	ops                 map[string]*loginOperation
-	client              *http.Client
-	deviceOrigin        string
+	mu           sync.Mutex
+	configMu     sync.Mutex
+	configPath   string
+	authDir      string
+	auth         *coreauth.Manager
+	ops          map[string]*loginOperation
+	client       *http.Client
+	deviceOrigin string
 }
 
 func NewLoginInputs(configPath, authDir string) *LoginInputs {
@@ -198,48 +199,6 @@ func (l *LoginInputs) runDevice(ctx context.Context, id, deviceID, code string, 
 	l.installFile(ctx, id, "codex", "oauth", email, mustJSON(value))
 }
 
-func (l *LoginInputs) importJSON(id, provider, raw string) (loginOperation, error) {
-	if provider != "codex" && provider != "claude" {
-		return loginOperation{}, errors.New("unsupported credential provider")
-	}
-	if len(raw) > 1<<20 {
-		return loginOperation{}, errors.New("credential JSON exceeds 1 MiB")
-	}
-	var value map[string]any
-	if json.Unmarshal([]byte(raw), &value) != nil || value == nil {
-		return loginOperation{}, errors.New("credential JSON is invalid")
-	}
-	if stringValue(value, "type") != provider {
-		return loginOperation{}, errors.New("credential JSON provider does not match")
-	}
-	email := stringValue(value, "email")
-	if email == "" {
-		email = stringValue(jwtClaims(stringValue(value, "id_token")), "email")
-		value["email"] = email
-	}
-	hasSessionKey := provider == "claude" && stringValue(value, "session_key") != ""
-	if email == "" || (stringValue(value, "access_token") == "" && stringValue(value, "refresh_token") == "" && !hasSessionKey) {
-		return loginOperation{}, errors.New("credential JSON requires an email and access or refresh token")
-	}
-	// Import only credential fields. Routing/network policy must stay AO-owned.
-	allowed := map[string]any{"type": provider, "email": email}
-	for _, key := range []string{"access_token", "refresh_token", "id_token", "session_key", "account_id", "expired", "plan_type", "last_refresh"} {
-		if v, ok := value[key]; ok {
-			if _, valid := v.(string); !valid {
-				return loginOperation{}, errors.New("credential fields must be strings")
-			}
-			allowed[key] = v
-		}
-	}
-	ctx, op, err := l.begin(id, provider, "import", time.Minute)
-	if err != nil {
-		return loginOperation{}, err
-	}
-	view := *op
-	go l.installFile(ctx, id, provider, "imported", email, mustJSON(allowed))
-	return view, nil
-}
-
 func (l *LoginInputs) installFile(ctx context.Context, id, provider, kind, email string, data []byte) {
 	name := "ao-" + id + ".json"
 	if err := ctx.Err(); err != nil {
@@ -250,7 +209,7 @@ func (l *LoginInputs) installFile(ctx context.Context, id, provider, kind, email
 		l.finish(id, nil, err)
 		return
 	}
-	auth, err := l.waitAuth(ctx, func(a *coreauth.Auth) bool { return a.Provider == provider && filepath.Base(a.FileName) == name })
+	auth, err := waitAuth(ctx, l.auth, func(a *coreauth.Auth) bool { return a.Provider == provider && filepath.Base(a.FileName) == name })
 	result := map[string]string{"provider": provider, "kind": kind, "email": email, "credential_ref": name}
 	if auth != nil {
 		result["auth_id"] = auth.ID
@@ -270,96 +229,8 @@ func (l *LoginInputs) writeAuthFile(name string, data []byte) error {
 	return writePrivate(filepath.Join(l.authDir, name), data)
 }
 
-func (l *LoginInputs) updateConfig(change func(*config.Config) error) error {
-	l.configMu.Lock()
-	defer l.configMu.Unlock()
-	cfg, err := config.LoadConfig(l.configPath)
-	if err != nil {
-		return err
-	}
-	if err = change(cfg); err != nil {
-		return err
-	}
-	return config.SaveConfigPreserveComments(l.configPath, cfg)
-}
-
-func (l *LoginInputs) addAPIKey(id, provider, key, base, label string) (loginOperation, error) {
-	if provider != "codex" && provider != "claude" {
-		return loginOperation{}, errors.New("unsupported API-key provider")
-	}
-	key, base, label = strings.TrimSpace(key), strings.TrimRight(strings.TrimSpace(base), "/"), strings.TrimSpace(label)
-	u, err := url.Parse(base)
-	if key == "" || err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return loginOperation{}, errors.New("API key and a valid HTTP(S) base URL are required")
-	}
-	ctx, op, err := l.begin(id, provider, "api_key", time.Minute)
-	if err != nil {
-		return loginOperation{}, err
-	}
-	err = l.updateConfig(func(cfg *config.Config) error {
-		if provider == "codex" {
-			for _, entry := range cfg.CodexKey {
-				if entry.APIKey == key && entry.BaseURL == base {
-					return errors.New("API key already exists")
-				}
-			}
-			cfg.CodexKey = append(cfg.CodexKey, config.CodexKey{APIKey: key, BaseURL: base})
-		} else {
-			for _, entry := range cfg.ClaudeKey {
-				if entry.APIKey == key && entry.BaseURL == base {
-					return errors.New("API key already exists")
-				}
-			}
-			cfg.ClaudeKey = append(cfg.ClaudeKey, config.ClaudeKey{APIKey: key, BaseURL: base})
-		}
-		return nil
-	})
-	if err != nil {
-		l.finish(id, nil, err)
-		return loginOperation{}, err
-	}
-	view := *op
-	go func() {
-		auth, err := l.waitAuth(ctx, func(a *coreauth.Auth) bool {
-			return a.Provider == provider && a.Attributes["api_key"] == key && a.Attributes["base_url"] == base
-		})
-		if label == "" && auth != nil {
-			label = strings.Title(provider) + " API key " + auth.ID
-		}
-		result := map[string]string{"provider": provider, "kind": "api_key", "email": label}
-		if auth != nil {
-			result["credential_ref"] = "config:" + auth.ID
-			result["auth_id"] = auth.ID
-		}
-		if !l.finish(id, result, err) {
-			_ = l.removeAPIKey(provider, key, base)
-		}
-	}()
-	return view, nil
-}
-
-func (l *LoginInputs) removeAPIKey(provider, key, base string) error {
-	return l.updateConfig(func(cfg *config.Config) error {
-		if provider == "codex" {
-			next := cfg.CodexKey[:0]
-			for _, e := range cfg.CodexKey {
-				if e.APIKey != key || e.BaseURL != base {
-					next = append(next, e)
-				}
-			}
-			cfg.CodexKey = next
-		} else {
-			next := cfg.ClaudeKey[:0]
-			for _, e := range cfg.ClaudeKey {
-				if e.APIKey != key || e.BaseURL != base {
-					next = append(next, e)
-				}
-			}
-			cfg.ClaudeKey = next
-		}
-		return nil
-	})
-}
+// Legacy API-key deletion is kept for accounts created before native management
+// support started recording a stable auth index.
 func (l *LoginInputs) deleteAPIKey(ctx context.Context, ref string) error {
 	if !strings.HasPrefix(ref, "config:") || len(ref) == len("config:") || strings.ContainsAny(ref, "/\\") {
 		return errors.New("invalid API-key reference")
@@ -367,26 +238,45 @@ func (l *LoginInputs) deleteAPIKey(ctx context.Context, ref string) error {
 	if l.auth == nil {
 		return errors.New("CLIProxy auth manager is unavailable")
 	}
-	id := strings.TrimPrefix(ref, "config:")
-	auth, ok := l.auth.GetByID(id)
+	auth, ok := l.auth.GetByID(strings.TrimPrefix(ref, "config:"))
 	if !ok {
 		return nil
 	}
-	if auth.Attributes["api_key"] == "" {
+	key, base := auth.Attributes["api_key"], auth.Attributes["base_url"]
+	if key == "" {
 		return errors.New("invalid API-key reference")
 	}
-	if err := l.removeAPIKey(auth.Provider, auth.Attributes["api_key"], auth.Attributes["base_url"]); err != nil {
+	l.configMu.Lock()
+	defer l.configMu.Unlock()
+	cfg, err := config.LoadConfig(l.configPath)
+	if err != nil {
 		return err
 	}
-	l.auth.Remove(ctx, id)
+	if auth.Provider == "codex" {
+		cfg.CodexKey = slices.DeleteFunc(cfg.CodexKey, func(entry config.CodexKey) bool {
+			return entry.APIKey == key && entry.BaseURL == base
+		})
+	} else {
+		cfg.ClaudeKey = slices.DeleteFunc(cfg.ClaudeKey, func(entry config.ClaudeKey) bool {
+			return entry.APIKey == key && entry.BaseURL == base
+		})
+	}
+	if err := config.SaveConfigPreserveComments(l.configPath, cfg); err != nil {
+		return err
+	}
+	l.auth.Remove(ctx, auth.ID)
 	return nil
 }
-func (l *LoginInputs) waitAuth(ctx context.Context, match func(*coreauth.Auth) bool) (*coreauth.Auth, error) {
-	if l.auth == nil {
+
+func waitAuth(ctx context.Context, manager *coreauth.Manager, match func(*coreauth.Auth) bool) (*coreauth.Auth, error) {
+	if manager == nil {
 		return nil, errors.New("CLIProxy auth manager is unavailable")
 	}
 	for {
-		for _, a := range l.auth.List() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		for _, a := range manager.List() {
 			if match(a) {
 				return a, nil
 			}

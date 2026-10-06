@@ -123,7 +123,6 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 			setChoiceProvider(provider);
 			setApiKeyOpen(false);
 			setApiKey(""); setBaseUrl(""); setLabel("");
-			if (next.url) await aoBridge.app.openExternal(next.url);
 		});
 	}
 	function chooseImport(provider: "codex" | "claude", accountId?: string) {

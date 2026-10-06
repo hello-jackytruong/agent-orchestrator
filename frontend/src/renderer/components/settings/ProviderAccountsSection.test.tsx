@@ -123,7 +123,8 @@ describe("provider account inventory", () => {
 		expect(row.getByRole("button", { name: "Remove" })).toHaveAttribute("title", "Remove");
 		await user.click(row.getByRole("button", { name: "Sign in again" }));
 		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/login", { body: { provider: "codex", accountId: "b" } });
-		expect(mock.open).toHaveBeenCalledWith("https://provider.test/login");
+		expect(mock.open).not.toHaveBeenCalled();
+		expect(screen.getByRole("button", { name: "Open sign-in" })).toBeEnabled();
 	});
 	it("distinguishes native device use from an adopted provider waiting for login", async () => {
 		inventory.accounts = [];
@@ -162,7 +163,7 @@ describe("provider account inventory", () => {
 		await user.click(within(accountRow(bob.email)).getByRole("button", { name: "Sign out" }));
 		const confirm = screen.getByRole("group", { name: "Confirm account change" });
 		expect(within(screen.getByTestId("provider-section-codex")).getByRole("group", { name: "Confirm account change" })).toBe(confirm);
-		expect(within(confirm).getByText(/Its sessions will use the default account/)).toHaveTextContent("If any are busy, wait until they are idle and retry.");
+		expect(within(confirm).getByText(/Existing sessions using this account will be transferred to the default account/)).toHaveTextContent("If any are busy, wait until they are idle and retry.");
 		expect(within(confirm).queryByRole("combobox")).toBeNull();
 		await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
 		expect(mock.post).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/sign-out", { params: { path: { accountId: "b" } }, body: { replacementPrimaryId: undefined } });
@@ -202,7 +203,7 @@ describe("provider account inventory", () => {
 });
 
 describe("provider browser login", () => {
-	it("opens the provider link and allows reopening and cancelling", async () => {
+	it("keeps the provider link in the panel until the user opens it", async () => {
 		mock.post.mockResolvedValue({ data: { id: "login-1", provider: "codex", url: "https://provider.test/login", status: "waiting", accountId: "" } });
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
@@ -211,10 +212,11 @@ describe("provider browser login", () => {
 		const group = screen.getByRole("group", { name: "codex sign-in methods" });
 		expect(await within(group).findByText("Complete sign-in in your browser.")).toBeInTheDocument();
 		expect(screen.getAllByRole("button", { name: "Add account" }).every(b => (b as HTMLButtonElement).disabled)).toBe(true);
+		expect(mock.open).not.toHaveBeenCalled();
 		await user.click(within(group).getByRole("button", { name: "Copy link" }));
 		expect(mock.clipboard).toHaveBeenCalledWith("https://provider.test/login");
 		await user.click(screen.getByRole("button", { name: "Open sign-in" }));
-		expect(mock.open).toHaveBeenCalledTimes(2);
+		expect(mock.open).toHaveBeenCalledTimes(1);
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
 		expect(mock.remove).toHaveBeenCalledWith("/api/v1/provider-accounts/login/{loginId}", { params: { path: { loginId: "login-1" } } });
 		await waitFor(() => expect(screen.queryByText("Complete sign-in in your browser.")).toBeNull());
@@ -234,6 +236,7 @@ describe("provider browser login", () => {
 		const user = userEvent.setup(); renderAccounts(); await screen.findByText(alice.email);
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
 		await user.click(screen.getByRole("button", { name: "Browser" }));
+		await user.click(screen.getByRole("button", { name: "Open sign-in" }));
 		expect(await screen.findByRole("status")).toHaveTextContent("Browser could not be opened");
 		expect(screen.getByRole("button", { name: "Open sign-in" })).toBeEnabled();
 	});
@@ -249,7 +252,7 @@ describe("pending login continuity", () => {
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
 		await user.click(screen.getByRole("button", { name: "Browser" }));
 		await screen.findByText("Complete sign-in in your browser.");
-		expect(mock.open).toHaveBeenCalledTimes(1);
+		expect(mock.open).not.toHaveBeenCalled();
 		expect(mock.post).toHaveBeenCalledTimes(1);
 		first.unmount();
 		render(<QueryClientProvider client={cache}><ProviderAccountsSection /></QueryClientProvider>);
@@ -257,7 +260,7 @@ describe("pending login continuity", () => {
 		expect(screen.getByRole("button", { name: "Open sign-in" })).toBeEnabled();
 		expect(screen.getAllByRole("button", { name: "Add account" }).every(button => (button as HTMLButtonElement).disabled)).toBe(true);
 		await user.click(screen.getByRole("button", { name: "Open sign-in" }));
-		expect(mock.open).toHaveBeenCalledTimes(2);
+		expect(mock.open).toHaveBeenCalledTimes(1);
 		expect(mock.post).toHaveBeenCalledTimes(1);
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
 		await waitFor(() => expect(screen.queryByText("Complete sign-in in your browser.")).toBeNull());
@@ -422,7 +425,7 @@ describe("login after daemon replacement", () => {
 		const user = userEvent.setup();
 		await user.click(screen.getAllByRole("button", { name: "Add account" })[0]);
 		await user.click(screen.getByRole("button", { name: "Browser" }));
-		expect(mock.open).toHaveBeenCalledWith("https://provider.test/new");
+		expect(mock.open).not.toHaveBeenCalled();
 		expect(cache.getQueryData(["provider-account-login"])).toMatchObject({ id: "new-attempt", status: "waiting" });
 		expect(screen.getByText(alice.email)).toBeInTheDocument();
 		expect(mock.put).not.toHaveBeenCalled();
@@ -459,6 +462,8 @@ describe("additional CLIProxy credential methods", () => {
 		expect(mock.clipboard).toHaveBeenCalledWith("ABCD-EFGH");
 		await user.click(within(group).getByRole("button", { name: "Copy link" }));
 		expect(mock.clipboard).toHaveBeenCalledWith("https://provider.test/device");
+		expect(mock.open).not.toHaveBeenCalled();
+		await user.click(within(group).getByRole("button", { name: "Open sign-in" }));
 		expect(mock.open).toHaveBeenCalledWith("https://provider.test/device");
 	});
 	it("sends the API key and base URL through AO without rendering the key", async () => {

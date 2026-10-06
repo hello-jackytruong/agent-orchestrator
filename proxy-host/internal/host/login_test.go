@@ -138,3 +138,21 @@ func TestLoginResultReturnsOnlyExactMarkedIdentityToControlClient(t *testing.T) 
 		}
 	}
 }
+
+func TestLoginResultFindsNativeImportedCredentialByReservedFileName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	routes := testRoutes(t)
+	manager := coreauth.NewManager(nil, nil, nil)
+	a := &coreauth.Auth{ID: "ao-import-attempt.json", FileName: "ao-import-attempt.json", Provider: "codex", Metadata: map[string]any{"email": "imported@example.test"}}
+	if _, err := manager.Register(coreauth.WithSkipPersist(context.Background()), a); err != nil {
+		t.Fatal(err)
+	}
+	boundary := Boundary{Routes: routes, ControlKey: strings.Repeat("c", 32), InferenceKey: strings.Repeat("i", 32)}
+	engine := gin.New()
+	engine.Use(boundary.Middleware)
+	boundary.Configure(engine, handlers.NewBaseAPIHandlers(&config.SDKConfig{}, manager), &config.Config{})
+	out := boundaryRequest(engine, "GET", "/ao/login-result/import-attempt", boundary.ControlKey, "", nil)
+	if out.Code != http.StatusOK || !strings.Contains(out.Body.String(), `"credential_ref":"ao-import-attempt.json"`) {
+		t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+	}
+}

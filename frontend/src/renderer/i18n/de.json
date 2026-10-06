@@ -2283,7 +2283,7 @@
 	"providerAccounts.confirmChange": "Kontoänderung bestätigen",
 	"providerAccounts.confirmSignOut": "{{email}} abmelden?",
 	"providerAccounts.confirmRemove": "{{email}} entfernen?",
-	"providerAccounts.affectedSessions": "Die Sitzungen verwenden das primäre Konto. Falls eine Sitzung arbeitet, warte, bis sie inaktiv ist, und versuche es erneut.",
+	"providerAccounts.affectedSessions": "Bestehende Sitzungen, die dieses Konto verwenden, werden auf das Standardkonto übertragen. Falls eine Sitzung arbeitet, warte, bis sie inaktiv ist, und versuche es erneut.",
 	"providerAccounts.noSessions": "Diesem Konto sind derzeit keine Sitzungen zugewiesen.",
 	"providerAccounts.noAccountsConsequence": "Ohne Konto musst du dich für verwaltete Anfragen erneut anmelden. Das nächste angemeldete Konto wird primär und stellt die wartenden Sitzungen wieder her.",
 	"providerAccounts.newPrimary": "Neues primäres Konto",

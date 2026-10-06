@@ -2265,7 +2265,7 @@
 	"providerAccounts.confirmChange": "确认账号变更",
 	"providerAccounts.confirmSignOut": "退出 {{email}}？",
 	"providerAccounts.confirmRemove": "移除 {{email}}？",
-	"providerAccounts.affectedSessions": "相关会话将使用主账号。如果有会话正在运行，请等待空闲后重试。",
+	"providerAccounts.affectedSessions": "使用此账号的现有会话将转移到默认账号。如果有会话正在运行，请等待空闲后重试。",
 	"providerAccounts.noSessions": "目前没有会话使用此账号。",
 	"providerAccounts.noAccountsConsequence": "移除全部账号后，托管请求需要重新登录。下次登录的账号将成为主账号，并恢复等待中的会话。",
 	"providerAccounts.newPrimary": "新主账号",

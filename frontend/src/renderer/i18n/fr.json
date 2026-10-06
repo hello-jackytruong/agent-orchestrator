@@ -2314,7 +2314,7 @@
 	"providerAccounts.confirmChange": "Confirmer le changement de compte",
 	"providerAccounts.confirmSignOut": "Déconnecter {{email}} ?",
 	"providerAccounts.confirmRemove": "Supprimer {{email}} ?",
-	"providerAccounts.affectedSessions": "Ses sessions utiliseront le compte principal. Si certaines travaillent, attendez qu’elles soient inactives, puis réessayez.",
+	"providerAccounts.affectedSessions": "Les sessions existantes qui utilisent ce compte seront transférées vers le compte par défaut. Si certaines travaillent, attendez qu’elles soient inactives, puis réessayez.",
 	"providerAccounts.noSessions": "Aucune session n’est actuellement attribuée à ce compte.",
 	"providerAccounts.noAccountsConsequence": "Sans compte, les requêtes gérées nécessitent une nouvelle connexion. Le prochain compte connecté deviendra principal et restaurera les sessions en attente.",
 	"providerAccounts.newPrimary": "Nouveau principal",

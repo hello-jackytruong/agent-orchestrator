@@ -2,10 +2,13 @@ package proxyhost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,7 +38,7 @@ func (c *Client) StartAccountLogin(ctx context.Context, provider, id string) (po
 		return ports.ProviderLogin{}, ports.ErrProviderLoginCallbackBusy
 	}
 	var login ports.ProviderLogin
-	if err = c.Management(ctx, http.MethodGet, "oauth/auth-url?provider="+provider, nil, &login, id); err != nil {
+	if err = c.management(ctx, http.MethodGet, "/v8/management/oauth/auth-url?provider="+provider, nil, &login, id); err != nil {
 		_ = listener.Close()
 		return login, err
 	}
@@ -55,7 +58,7 @@ func (c *Client) StartAccountLogin(ctx context.Context, provider, id string) (po
 		callbackCtx, done := context.WithTimeout(context.Background(), 10*time.Second)
 		defer done()
 		body := map[string]string{"provider": provider, "state": login.State, "code": r.URL.Query().Get("code"), "error": r.URL.Query().Get("error")}
-		if err := c.Management(callbackCtx, http.MethodPost, "oauth/callback", body, nil, ""); err != nil {
+		if err := c.management(callbackCtx, http.MethodPost, "/v8/management/oauth/callback", body, nil, ""); err != nil {
 			http.Error(w, "Login could not be completed. Return to AO and retry.", http.StatusBadGateway)
 			return
 		}
@@ -77,6 +80,17 @@ func closeRelay(root, id string) {
 
 // AccountLoginStatus polls upstream completion and releases terminal callback listeners.
 func (c *Client) AccountLoginStatus(ctx context.Context, login ports.ProviderLogin) (string, error) {
+	if login.Mode == "import" || login.Mode == "api_key" {
+		if _, err := c.VerifiedAccountLogin(ctx, login.ID); err == nil {
+			return "complete", nil
+		} else {
+			var status statusError
+			if !errors.As(err, &status) || status.status != http.StatusNotFound {
+				return "", err
+			}
+		}
+		return "waiting", nil
+	}
 	if login.Mode != "" && login.Mode != "browser" {
 		var result ports.ProviderLogin
 		if err := c.call(ctx, http.MethodGet, "/ao/login/status?id="+queryEscape(login.ID), nil, &result, nil); err != nil {
@@ -88,7 +102,7 @@ func (c *Client) AccountLoginStatus(ctx context.Context, login ports.ProviderLog
 		Status string `json:"status"`
 		Error  string `json:"error"`
 	}
-	if err := c.Management(ctx, http.MethodGet, "oauth/status?state="+queryEscape(login.State), nil, &result, ""); err != nil {
+	if err := c.management(ctx, http.MethodGet, "/v8/management/oauth/status?state="+queryEscape(login.State), nil, &result, ""); err != nil {
 		return "", err
 	}
 	switch result.Status {
@@ -106,10 +120,16 @@ func (c *Client) AccountLoginStatus(ctx context.Context, login ports.ProviderLog
 
 // CancelAccountLogin cancels upstream login and closes its callback listener.
 func (c *Client) CancelAccountLogin(ctx context.Context, login ports.ProviderLogin) error {
+	if login.Mode == "import" {
+		return c.DeleteCredential(ctx, "ao-"+login.ID+".json")
+	}
+	if login.Mode == "api_key" {
+		return nil
+	}
 	if login.Mode != "" && login.Mode != "browser" {
 		return c.call(ctx, http.MethodDelete, "/ao/login/status?id="+queryEscape(login.ID), nil, nil, nil)
 	}
-	err := c.Management(ctx, http.MethodDelete, "oauth/session?state="+queryEscape(login.State), nil, nil, "")
+	err := c.management(ctx, http.MethodDelete, "/v8/management/oauth/session?state="+queryEscape(login.State), nil, nil, "")
 	closeRelay(c.root, login.ID)
 	return err
 }
@@ -117,35 +137,70 @@ func (c *Client) CancelAccountLogin(ctx context.Context, login ports.ProviderLog
 // VerifiedAccountLogin reads the verified identity for the exact login attempt.
 func (c *Client) VerifiedAccountLogin(ctx context.Context, id string) (ports.VerifiedProviderLogin, error) {
 	var result ports.VerifiedProviderLogin
-	err := c.LoginResult(ctx, id, &result)
+	err := c.call(ctx, http.MethodGet, "/ao/login-result/"+queryEscape(id), nil, &result, nil)
 	return result, err
 }
 
-// StartAccountLoginMode forwards credentials only over the private helper channel.
+// StartAccountLoginMode uses CLIProxy's native credential management APIs.
 func (c *Client) StartAccountLoginMode(ctx context.Context, provider, id, mode string, input ports.ProviderLoginInput) (ports.ProviderLogin, error) {
-	path := ""
-	body := map[string]string{"id": id, "provider": provider}
+	if provider != "codex" && provider != "claude" {
+		return ports.ProviderLogin{}, ports.ErrProviderAccountIncompatible
+	}
 	switch mode {
 	case "device":
 		if provider != "codex" {
 			return ports.ProviderLogin{}, ports.ErrProviderAccountIncompatible
 		}
-		path = "/ao/login/device/start"
+		if err := c.Ensure(ctx); err != nil {
+			return ports.ProviderLogin{}, err
+		}
+		var login ports.ProviderLogin
+		err := c.call(ctx, http.MethodPost, "/ao/login/device/start", map[string]string{"id": id}, &login, nil)
+		return login, err
 	case "import":
-		path = "/ao/login/import"
-		body["credential_json"] = input.CredentialJSON
+		if len(input.CredentialJSON) > 1<<20 {
+			return ports.ProviderLogin{}, errors.New("credential JSON exceeds 1 MiB")
+		}
+		var value map[string]any
+		if json.Unmarshal([]byte(input.CredentialJSON), &value) != nil || value == nil {
+			return ports.ProviderLogin{}, errors.New("credential JSON is invalid")
+		}
+		if strings.TrimSpace(fmt.Sprint(value["type"])) != provider {
+			return ports.ProviderLogin{}, ports.ErrProviderAccountIncompatible
+		}
+		name := "ao-" + id + ".json"
+		if err := c.management(ctx, http.MethodPost, "/v8/management/credentials?name="+url.QueryEscape(name), json.RawMessage(input.CredentialJSON), nil, id); err != nil {
+			return ports.ProviderLogin{}, err
+		}
 	case "api_key":
-		path = "/ao/api-key"
-		body["api_key"] = input.APIKey
-		body["base_url"] = input.BaseURL
-		body["label"] = input.Label
+		if strings.TrimSpace(input.APIKey) == "" {
+			return ports.ProviderLogin{}, errors.New("API key is required")
+		}
+		base := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+		u, err := url.Parse(base)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return ports.ProviderLogin{}, errors.New("a valid HTTP(S) base URL is required")
+		}
+		field := provider + "-api-key"
+		entries, err := c.apiKeys(ctx, field)
+		if err != nil {
+			return ports.ProviderLogin{}, err
+		}
+		for _, entry := range entries {
+			if fmt.Sprint(entry["api-key"]) == input.APIKey && strings.TrimRight(fmt.Sprint(entry["base-url"]), "/") == base {
+				return ports.ProviderLogin{}, errors.New("API key already exists")
+			}
+		}
+		entries = append(entries, map[string]any{"api-key": input.APIKey, "base-url": base})
+		if err := c.management(ctx, http.MethodPut, "/v0/management/"+field, entries, nil, id); err != nil {
+			return ports.ProviderLogin{}, err
+		}
+		if err := c.call(ctx, http.MethodPost, "/ao/tag-api-key", map[string]string{"id": id, "provider": provider, "api_key": input.APIKey, "base_url": base, "label": input.Label}, nil, nil); err != nil {
+			_ = c.management(ctx, http.MethodDelete, "/v0/management/"+field+"?api-key="+url.QueryEscape(input.APIKey)+"&base-url="+url.QueryEscape(base), nil, nil, "")
+			return ports.ProviderLogin{}, err
+		}
 	default:
 		return ports.ProviderLogin{}, ports.ErrProviderAccountIncompatible
 	}
-	if err := c.Ensure(ctx); err != nil {
-		return ports.ProviderLogin{}, err
-	}
-	var login ports.ProviderLogin
-	err := c.call(ctx, http.MethodPost, path, body, &login, nil)
-	return login, err
+	return ports.ProviderLogin{ID: id, Provider: provider, Mode: mode, Status: "waiting", ExpiresIn: 60}, nil
 }

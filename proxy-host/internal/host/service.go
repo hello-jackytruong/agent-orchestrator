@@ -32,6 +32,9 @@ func Build(root string, port int, controlKey, inferenceKey string, routes *Route
 		cfg.CommercialMode, cfg.MaxRetryCredentials, cfg.WebsocketAuth = true, 1, true
 		cfg.APIKeys = []string{inferenceKey}
 		cfg.Routing.Strategy = "fill-first"
+		// AO supplies the exact account for every request; CLIProxy must not
+		// replace that choice with its own session-affinity table.
+		cfg.Routing.SessionAffinity = false
 		cfg.RemoteManagement.DisableControlPanel = true
 		cfg.RemoteManagement.DisableAutoUpdatePanel = true
 		cfg.RemoteManagement.SecretKey = string(secret)

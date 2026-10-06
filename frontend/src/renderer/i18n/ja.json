@@ -2283,7 +2283,7 @@
 	"providerAccounts.confirmChange": "アカウント変更の確認",
 	"providerAccounts.confirmSignOut": "{{email}} からログアウトしますか？",
 	"providerAccounts.confirmRemove": "{{email}} を削除しますか？",
-	"providerAccounts.affectedSessions": "関連するセッションはメインアカウントを使用します。処理中の場合は待機状態になるまで待って再試行してください。",
+	"providerAccounts.affectedSessions": "このアカウントを使用している既存のセッションは、デフォルトアカウントに移行されます。処理中の場合は待機状態になるまで待って再試行してください。",
 	"providerAccounts.noSessions": "このアカウントに割り当てられたセッションはありません。",
 	"providerAccounts.noAccountsConsequence": "アカウントがなくなると、管理対象のリクエストには再ログインが必要です。次にログインしたアカウントがメインになり、待機中のセッションを復旧します。",
 	"providerAccounts.newPrimary": "新しいメイン",

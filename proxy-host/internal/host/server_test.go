@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -133,12 +134,12 @@ func TestBoundaryManagementAllowlist(t *testing.T) {
 		method, path string
 		allowed      bool
 	}{
-		{"GET", "credentials", true}, {"DELETE", "credentials?name=account.json", true},
+		{"GET", "credentials", true}, {"POST", "credentials", true}, {"DELETE", "credentials?name=account.json", true},
 		{"GET", "oauth/auth-url?provider=codex", true}, {"GET", "oauth/status?state=s", true},
 		{"POST", "oauth/callback", true}, {"DELETE", "oauth/session?state=s", true},
 		{"PATCH", "credentials/status", false}, {"GET", "config", false}, {"PUT", "config", false},
 		{"GET", "auth-files", false}, {"GET", "api-keys", false}, {"PUT", "routing/strategy", false},
-		{"POST", "credentials", false}, {"DELETE", "oauth/auth-url", false},
+		{"DELETE", "oauth/auth-url", false},
 	} {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			w := boundaryRequest(engine, tc.method, "/v8/management/"+tc.path, strings.Repeat("c", 32), "", nil)
@@ -173,6 +174,33 @@ func TestBoundaryLegacyQuotaFetchIsPrivateAndOnlyReadOperationAllowed(t *testing
 	}
 	if response := boundaryRequest(engine, http.MethodGet, "/v0/management/quota/fetch", control, "", nil); response.Code != http.StatusNotFound {
 		t.Fatalf("unexpected quota method allowed: %d", response.Code)
+	}
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+		for _, provider := range []string{"codex", "claude"} {
+			path := "/v0/management/" + provider + "-api-key"
+			if response := boundaryRequest(engine, method, path, control, "[]", nil); response.Code != http.StatusOK {
+				t.Fatalf("native %s %s status=%d", method, path, response.Code)
+			}
+		}
+	}
+}
+
+func TestTagAPIKeyAssociatesNativeCredentialWithLogin(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	if _, err := manager.Register(context.Background(), &coreauth.Auth{ID: "key-auth", Provider: "codex", Status: coreauth.StatusActive, Attributes: map[string]string{"api_key": "secret", "base_url": "https://api.example"}}); err != nil {
+		t.Fatal(err)
+	}
+	routes := testRoutes(t)
+	engine := gin.New()
+	b := Boundary{Routes: routes, ControlKey: strings.Repeat("c", 32), InferenceKey: strings.Repeat("i", 32)}
+	b.Configure(engine, handlers.NewBaseAPIHandlers(&config.SDKConfig{}, manager), &config.Config{})
+	response := boundaryRequest(engine, http.MethodPost, "/ao/tag-api-key", strings.Repeat("c", 32), `{"id":"login-1","provider":"codex","api_key":"secret","base_url":"https://api.example"}`, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	auth, _ := manager.GetByID("key-auth")
+	if auth.Metadata["ao_login_id"] != "login-1" {
+		t.Fatalf("metadata=%v", auth.Metadata)
 	}
 }
 func TestBoundaryDisablesAllInterfaceOAuthForwarder(t *testing.T) {

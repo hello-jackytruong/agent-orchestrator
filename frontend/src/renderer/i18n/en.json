@@ -2271,7 +2271,7 @@
 	"providerAccounts.moveExistingSessions": "Move existing sessions",
 	"providerAccounts.confirmSignOut": "Sign out {{email}}?",
 	"providerAccounts.confirmRemove": "Remove {{email}}?",
-	"providerAccounts.affectedSessions": "Its sessions will use the default account. If any are busy, wait until they are idle and retry.",
+	"providerAccounts.affectedSessions": "Existing sessions using this account will be transferred to the default account. If any are busy, wait until they are idle and retry.",
 	"providerAccounts.noSessions": "No sessions are currently assigned to this account.",
 	"providerAccounts.noAccountsConsequence": "With no account left, managed requests need you to sign in again. The next sign-in becomes the default and restores those waiting sessions.",
 	"providerAccounts.newPrimary": "New default",

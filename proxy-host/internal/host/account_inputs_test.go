@@ -16,7 +16,6 @@ import (
 	"time"
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
-	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
 
 type inputTransport struct {
@@ -273,194 +272,7 @@ func TestDeviceStartMapsProviderHTTPFailuresWithoutEchoingBody(t *testing.T) {
 	}
 }
 
-func TestImportRejectsMalformedProviderCredentials(t *testing.T) {
-	cases := []struct{ name, provider, raw string }{
-		{"unsupported-provider", "gemini", `{"type":"gemini","email":"a@example.test","access_token":"token"}`},
-		{"empty", "codex", ""},
-		{"malformed", "codex", "{"},
-		{"array", "codex", "[]"},
-		{"wrong-provider", "codex", `{"type":"claude","email":"a@example.test","access_token":"token"}`},
-		{"missing-email", "codex", `{"type":"codex","access_token":"token"}`},
-		{"missing-token", "codex", `{"type":"codex","email":"a@example.test"}`},
-		{"non-string-token", "codex", `{"type":"codex","email":"a@example.test","access_token":42}`},
-		{"claude-wrong-type", "claude", `{"type":"codex","email":"a@example.test","access_token":"token"}`},
-		{"claude-missing-token", "claude", `{"type":"claude","email":"a@example.test"}`},
-		{"claude-non-string-email", "claude", `{"type":"claude","email":42,"access_token":"token"}`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			inputs, _, _ := newInputHarness(t)
-			if _, err := inputs.importJSON("attempt", tc.provider, tc.raw); err == nil {
-				t.Fatal("invalid credential was accepted")
-			}
-			if _, ok := inputs.operation("attempt"); ok {
-				t.Fatal("invalid import created an operation")
-			}
-		})
-	}
-}
-
-func TestImportAcceptsCodexAndClaudeCredentialShapes(t *testing.T) {
-	cases := []struct{ name, provider, raw string }{
-		{"codex-access", "codex", `{"type":"codex","email":"a@example.test","access_token":"access"}`},
-		{"codex-refresh", "codex", `{"type":"codex","email":"a@example.test","refresh_token":"refresh"}`},
-		{"codex-both", "codex", `{"type":"codex","email":"a@example.test","access_token":"access","refresh_token":"refresh","id_token":"id"}`},
-		{"claude-access", "claude", `{"type":"claude","email":"a@example.test","access_token":"access"}`},
-		{"claude-refresh", "claude", `{"type":"claude","email":"a@example.test","refresh_token":"refresh"}`},
-		{"claude-session", "claude", `{"type":"claude","email":"a@example.test","session_key":"session"}`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			inputs, _, root := newInputHarness(t)
-			// The operation is intentionally left waiting because a real auth-manager
-			// watcher is the component that confirms the file was accepted.
-			op, err := inputs.importJSON("attempt-"+tc.name, tc.provider, tc.raw)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if op.Status != "waiting" || op.Mode != "import" {
-				t.Fatalf("operation=%+v", op)
-			}
-			file := filepath.Join(root, "auth", "ao-attempt-"+tc.name+".json")
-			deadline := time.Now().Add(time.Second)
-			for time.Now().Before(deadline) {
-				if _, statErr := os.Stat(file); statErr == nil {
-					break
-				}
-				time.Sleep(time.Millisecond)
-			}
-			data, readErr := os.ReadFile(file)
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
-			var stored map[string]any
-			if err := json.Unmarshal(data, &stored); err != nil {
-				t.Fatal(err)
-			}
-			if stored["type"] != tc.provider || stored["email"] != "a@example.test" {
-				t.Fatalf("stored=%v", stored)
-			}
-			if stored["access_token"] == "" && stored["refresh_token"] == "" && stored["session_key"] == "" {
-				t.Fatalf("stored credential missing token: %v", stored)
-			}
-			inputs.cancel(op.ID)
-		})
-	}
-}
-
-func TestImportPreservesOnlyKnownCredentialFields(t *testing.T) {
-	inputs, _, root := newInputHarness(t)
-	raw := `{"type":"codex","email":"a@example.test","access_token":"secret","api_key":"should-not-be-copied","base_url":"https://should-not-be-copied.test","note":"should-not-be-copied"}`
-	op, err := inputs.importJSON("filtered", "codex", raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if op.Mode != "import" {
-		t.Fatalf("operation=%+v", op)
-	}
-	deadline := time.Now().Add(time.Second)
-	path := filepath.Join(root, "auth", "ao-filtered.json")
-	for time.Now().Before(deadline) {
-		if _, statErr := os.Stat(path); statErr == nil {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "should-not-be-copied") || strings.Contains(string(data), "api_key") || strings.Contains(string(data), "base_url") {
-		t.Fatalf("untrusted fields copied: %s", data)
-	}
-	inputs.cancel("filtered")
-}
-
-func TestImportEnforcesCredentialSizeLimit(t *testing.T) {
-	inputs, _, _ := newInputHarness(t)
-	raw := `{"type":"codex","email":"a@example.test","access_token":"` + strings.Repeat("x", 1<<20) + `"}`
-	if _, err := inputs.importJSON("large", "codex", raw); err == nil {
-		t.Fatal("oversized credential was accepted")
-	}
-	if _, ok := inputs.operation("large"); ok {
-		t.Fatal("oversized credential created operation")
-	}
-}
-
-func TestAPIKeyValidationRejectsUnsafeEndpointsAndUnsupportedProviders(t *testing.T) {
-	cases := []struct{ name, provider, key, base string }{
-		{"empty-key", "codex", "", "https://api.example.test"},
-		{"empty-base", "codex", "secret", ""},
-		{"malformed-base", "codex", "secret", "not a URL"},
-		{"file-base", "codex", "secret", "file:///tmp/credential"},
-		{"user-info", "codex", "secret", "https://user:pass@example.test"},
-		{"query", "codex", "secret", "https://api.example.test?token=secret"},
-		{"fragment", "codex", "secret", "https://api.example.test/#secret"},
-		{"empty-host", "codex", "secret", "https://"},
-		{"unsupported", "gemini", "secret", "https://api.example.test"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			inputs, _, _ := newInputHarness(t)
-			if _, err := inputs.addAPIKey("attempt", tc.provider, tc.key, tc.base, "label"); err == nil {
-				t.Fatal("unsafe API-key input accepted")
-			}
-		})
-	}
-}
-
-func TestAPIKeyConfigEntryIsWrittenWithoutReturningTheSecret(t *testing.T) {
-	inputs, manager, root := newInputHarness(t)
-	op, err := inputs.addAPIKey("key-attempt", "codex", "secret-api-key", "https://api.example.test", "Team key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if op.Status != "waiting" || op.Mode != "api_key" || op.URL != "" || op.Code != "" {
-		t.Fatalf("operation=%+v", op)
-	}
-	configData, err := os.ReadFile(filepath.Join(root, "config.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(configData), "secret-api-key") || !strings.Contains(string(configData), "api.example.test") {
-		t.Fatalf("API key was not persisted: %s", configData)
-	}
-	if strings.Contains(opString(op), "secret-api-key") {
-		t.Fatal("API key leaked in operation")
-	}
-	if strings.Contains(opString(op), "api.example.test") {
-		t.Fatal("base URL leaked in operation")
-	}
-	_, err = manager.Register(coreauth.WithSkipPersist(context.Background()), &coreauth.Auth{ID: "key-auth", Provider: "codex", FileName: "config-key-auth", Attributes: map[string]string{"api_key": "secret-api-key", "base_url": "https://api.example.test"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		current, _ := inputs.operation("key-attempt")
-		if current.Status == "complete" {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	current, _ := inputs.operation("key-attempt")
-	if current.Status != "complete" || current.Result["credential_ref"] != "config:key-auth" {
-		t.Fatalf("operation=%+v", current)
-	}
-}
-
 func opString(op loginOperation) string { data, _ := json.Marshal(op); return string(data) }
-
-func TestAPIKeyConfigRejectsDuplicateEntries(t *testing.T) {
-	inputs, _, _ := newInputHarness(t)
-	if _, err := inputs.addAPIKey("first", "codex", "secret", "https://api.example.test", "one"); err != nil {
-		t.Fatal(err)
-	}
-	inputs.cancel("first")
-	if _, err := inputs.addAPIKey("second", "codex", "secret", "https://api.example.test", "two"); err == nil {
-		t.Fatal("duplicate API key was accepted")
-	}
-}
 
 func TestPrivateAuthFilesUseOwnerOnlyPermissions(t *testing.T) {
 	inputs, _, root := newInputHarness(t)
@@ -481,21 +293,6 @@ func TestPrivateAuthFilesUseOwnerOnlyPermissions(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "auth", "invalid.json")); !os.IsNotExist(err) {
 		t.Fatalf("invalid file exists: %v", err)
-	}
-}
-
-func TestDeleteAPIKeyRejectsMissingAuthManagerAndUnknownReference(t *testing.T) {
-	inputs, _, _ := newInputHarness(t)
-	inputs.auth = nil
-	if err := inputs.deleteAPIKey(context.Background(), "config:key"); err == nil {
-		t.Fatal("nil manager accepted")
-	}
-	inputs, _, _ = newInputHarness(t)
-	if err := inputs.deleteAPIKey(context.Background(), "config:missing"); err != nil {
-		t.Fatalf("unknown API key delete=%v", err)
-	}
-	if err := inputs.deleteAPIKey(context.Background(), "credential.json"); err == nil {
-		t.Fatal("file reference reached API key deletion")
 	}
 }
 
@@ -558,24 +355,6 @@ func TestRequestMapsMalformedAndOversizedResponsesToSafeErrors(t *testing.T) {
 	}
 }
 
-func TestConfigPathCannotEscapeTheChosenHelperRoot(t *testing.T) {
-	inputs, _, root := newInputHarness(t)
-	if filepath.Dir(inputs.configPath) != root {
-		t.Fatalf("config root=%s", filepath.Dir(inputs.configPath))
-	}
-	if inputs.authDir != filepath.Join(root, "auth") {
-		t.Fatalf("auth root=%s", inputs.authDir)
-	}
-	if filepath.Base(inputs.configPath) != "config.yaml" {
-		t.Fatalf("config path=%s", inputs.configPath)
-	}
-	for _, path := range []string{inputs.configPath, inputs.authDir} {
-		if !filepath.IsAbs(path) {
-			t.Fatalf("path is relative: %s", path)
-		}
-	}
-}
-
 func TestProviderURLValidationRejectsCredentialBearingURLParts(t *testing.T) {
 	for _, raw := range []string{
 		"https://example.test/path",
@@ -613,47 +392,4 @@ func TestStoredOperationJSONHasNoPrivateResultMap(t *testing.T) {
 			t.Fatalf("private value %q leaked: %s", secret, raw)
 		}
 	}
-}
-
-func TestImportedCredentialDoesNotMutateCallerJSONMap(t *testing.T) {
-	inputs, _, root := newInputHarness(t)
-	original := map[string]any{"type": "codex", "email": "a@example.test", "access_token": "secret", "note": "caller-only"}
-	rawBytes, _ := json.Marshal(original)
-	if _, err := inputs.importJSON("copy", "codex", string(rawBytes)); err != nil {
-		t.Fatal(err)
-	}
-	if original["note"] != "caller-only" || original["access_token"] != "secret" {
-		t.Fatalf("caller map changed=%v", original)
-	}
-	path := filepath.Join(root, "auth", "ao-copy.json")
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "caller-only") {
-		t.Fatal("untrusted note was stored")
-	}
-	inputs.cancel("copy")
-}
-
-func TestConfigTypeCanStillBeLoadedAfterAnAPIKeyAttempt(t *testing.T) {
-	inputs, _, root := newInputHarness(t)
-	if _, err := inputs.addAPIKey("loadable", "codex", "key", "https://api.example.test", "label"); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := config.LoadConfig(filepath.Join(root, "config.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(loaded.CodexKey) != 1 || loaded.CodexKey[0].APIKey != "key" || loaded.CodexKey[0].BaseURL != "https://api.example.test" {
-		t.Fatalf("loaded=%+v", loaded.CodexKey)
-	}
-	inputs.cancel("loadable")
 }

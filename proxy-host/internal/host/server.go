@@ -1,14 +1,17 @@
 package host
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
 
@@ -74,11 +77,15 @@ func equalKey(actual, expected string) bool {
 }
 func allowedManagement(r *http.Request) bool {
 	if strings.HasPrefix(r.URL.Path, "/v0/management/") {
-		return r.Method == http.MethodPost && r.URL.Path == "/v0/management/quota/fetch"
+		if r.Method == http.MethodPost && r.URL.Path == "/v0/management/quota/fetch" {
+			return true
+		}
+		return (r.Method == http.MethodGet || r.Method == http.MethodPut || r.Method == http.MethodDelete) &&
+			(r.URL.Path == "/v0/management/codex-api-key" || r.URL.Path == "/v0/management/claude-api-key")
 	}
 	key := r.Method + " " + strings.TrimPrefix(r.URL.Path, "/v8/management/")
 	switch key {
-	case "GET credentials", "DELETE credentials", "GET oauth/auth-url", "GET oauth/status", "POST oauth/callback", "DELETE oauth/session":
+	case "GET credentials", "POST credentials", "DELETE credentials", "GET oauth/auth-url", "GET oauth/status", "POST oauth/callback", "DELETE oauth/session":
 		return true
 	}
 	return false
@@ -157,9 +164,14 @@ func (b Boundary) Configure(engine *gin.Engine, h *handlers.BaseAPIHandler, _ *c
 			}
 		}
 		for _, a := range h.AuthManager.List() {
-			if a.Metadata["ao_login_id"] == c.Param("id") {
+			loginID := c.Param("id")
+			if a.Metadata["ao_login_id"] == loginID || a.FileName == "ao-"+loginID+".json" {
 				email, _ := a.Metadata["email"].(string)
-				c.JSON(http.StatusOK, gin.H{"provider": a.Provider, "email": email, "credential_ref": a.FileName, "auth_id": a.ID})
+				ref := a.FileName
+				if a.Attributes["api_key"] != "" {
+					ref = "config-index:" + a.Provider + ":" + a.EnsureIndex()
+				}
+				c.JSON(http.StatusOK, gin.H{"provider": a.Provider, "email": email, "credential_ref": ref, "auth_id": a.ID})
 				return
 			}
 		}
@@ -176,23 +188,6 @@ func (b Boundary) Configure(engine *gin.Engine, h *handlers.BaseAPIHandler, _ *c
 		op, err := b.LoginInputs.startDevice(c.Request.Context(), body.ID)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, op)
-	})
-	engine.POST("/ao/login/import", func(c *gin.Context) {
-		var raw struct {
-			ID             string `json:"id"`
-			Provider       string `json:"provider"`
-			CredentialJSON string `json:"credential_json"`
-		}
-		if b.LoginInputs == nil || c.ShouldBindJSON(&raw) != nil || strings.TrimSpace(raw.ID) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credential import"})
-			return
-		}
-		op, err := b.LoginInputs.importJSON(raw.ID, strings.TrimSpace(raw.Provider), raw.CredentialJSON)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, op)
@@ -215,24 +210,46 @@ func (b Boundary) Configure(engine *gin.Engine, h *handlers.BaseAPIHandler, _ *c
 		}
 		c.Status(http.StatusNoContent)
 	})
-	engine.POST("/ao/api-key", func(c *gin.Context) {
-		var raw struct {
+	engine.POST("/ao/tag-api-key", func(c *gin.Context) {
+		var body struct {
 			ID       string `json:"id"`
 			Provider string `json:"provider"`
 			APIKey   string `json:"api_key"`
 			BaseURL  string `json:"base_url"`
 			Label    string `json:"label"`
 		}
-		if b.LoginInputs == nil || c.ShouldBindJSON(&raw) != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid API key request"})
+		if c.ShouldBindJSON(&body) != nil || !validLoginID(body.ID) || (body.Provider != "codex" && body.Provider != "claude") || body.APIKey == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid API-key tag"})
 			return
 		}
-		op, err := b.LoginInputs.addAPIKey(raw.ID, raw.Provider, raw.APIKey, raw.BaseURL, raw.Label)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+		a, err := waitAuth(ctx, h.AuthManager, func(a *coreauth.Auth) bool {
+			return a.Provider == body.Provider && a.Attributes["api_key"] == body.APIKey && strings.TrimRight(a.Attributes["base_url"], "/") == strings.TrimRight(body.BaseURL, "/")
+		})
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			if c.Request.Context().Err() != nil {
+				c.AbortWithStatus(http.StatusRequestTimeout)
+			} else {
+				c.AbortWithStatus(http.StatusNotFound)
+			}
 			return
 		}
-		c.JSON(http.StatusOK, op)
+		if a.Metadata == nil {
+			a.Metadata = map[string]any{}
+		}
+		a.Metadata["ao_login_id"] = body.ID
+		label := strings.TrimSpace(body.Label)
+		if label == "" {
+			label = body.Provider + " API key"
+		}
+		a.Metadata["email"] = label
+		updated, err := h.AuthManager.Update(c.Request.Context(), a)
+		if err != nil || updated == nil {
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"auth_id": updated.ID})
 	})
 	engine.DELETE("/ao/api-key", func(c *gin.Context) {
 		if b.LoginInputs == nil {

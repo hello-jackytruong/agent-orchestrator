@@ -24,6 +24,111 @@ func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func fakeResponse(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
 }
+
+func TestDeleteCredentialUsesNativeAPIKeyIndex(t *testing.T) {
+	var requests []*http.Request
+	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/ao/status" {
+			return fakeResponse(200, `{"protocol_version":2}`), nil
+		}
+		requests = append(requests, r)
+		if r.Method == http.MethodGet {
+			return fakeResponse(200, `{"claude-api-key":[{"api-key":"key","auth-index":"stable-index"}]}`), nil
+		}
+		return fakeResponse(200, `{}`), nil
+	})
+	if err := c.DeleteCredential(context.Background(), "config-index:claude:stable-index"); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 || requests[0].Method != http.MethodGet || requests[1].Method != http.MethodDelete || requests[1].URL.Path != "/v0/management/claude-api-key" || requests[1].URL.Query().Get("index") != "0" {
+		t.Fatalf("requests=%v", requests)
+	}
+}
+
+func TestDeleteCredentialLeavesMissingNativeAPIKeyUntouched(t *testing.T) {
+	deletes := 0
+	c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/ao/status" {
+			return fakeResponse(200, `{"protocol_version":2}`), nil
+		}
+		if r.Method == http.MethodDelete {
+			deletes++
+		}
+		return fakeResponse(200, `{"codex-api-key":[]}`), nil
+	})
+	if err := c.DeleteCredential(context.Background(), "config-index:codex:missing"); err != nil {
+		t.Fatal(err)
+	}
+	if deletes != 0 {
+		t.Fatalf("unexpected native delete calls=%d", deletes)
+	}
+}
+
+func TestNativeAPIKeyListFailuresNeverMutateCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"unavailable", `{}`, 503},
+		{"unauthorized", `{}`, 401},
+		{"invalid-json", `{`, 200},
+		{"missing-list", `{}`, 200},
+		{"wrong-provider", `{"claude-api-key":[]}`, 200},
+		{"wrong-list-type", `{"codex-api-key":{}}`, 200},
+		{"wrong-entry-type", `{"codex-api-key":["secret"]}`, 200},
+	} {
+		for _, operation := range []string{"add", "delete"} {
+			t.Run(tc.name+"/"+operation, func(t *testing.T) {
+				c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+					if r.URL.Path == "/ao/status" {
+						return fakeResponse(200, `{"protocol_version":2}`), nil
+					}
+					if r.Method != http.MethodGet || r.URL.Path != "/v0/management/codex-api-key" {
+						t.Fatalf("invalid listing triggered %s %s", r.Method, r.URL.Path)
+					}
+					return fakeResponse(tc.status, tc.body), nil
+				})
+				var err error
+				if operation == "add" {
+					_, err = c.StartAccountLoginMode(context.Background(), "codex", "key-1", "api_key", ports.ProviderLoginInput{APIKey: "secret", BaseURL: "https://api.example"})
+				} else {
+					err = c.DeleteCredential(context.Background(), "config-index:codex:stable")
+				}
+				if err == nil {
+					t.Fatal("invalid native list was accepted")
+				}
+			})
+		}
+	}
+}
+
+func TestDeleteCredentialUsesCurrentPositionForStableIdentity(t *testing.T) {
+	for _, provider := range []string{"codex", "claude"} {
+		t.Run(provider, func(t *testing.T) {
+			deleted := false
+			c := privateClient(t, func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/ao/status" {
+					return fakeResponse(200, `{"protocol_version":2}`), nil
+				}
+				if r.URL.Path != "/v0/management/"+provider+"-api-key" {
+					t.Fatalf("wrong provider path: %s", r.URL.Path)
+				}
+				if r.Method == http.MethodGet {
+					return fakeResponse(200, `{"`+provider+`-api-key":[{"auth-index":123},{"auth-index":"other"},{"auth-index":"stable"}]}`), nil
+				}
+				if r.Method != http.MethodDelete || r.URL.Query().Get("index") != "2" {
+					t.Fatalf("wrong delete: %s %s", r.Method, r.URL)
+				}
+				deleted = true
+				return fakeResponse(200, `{}`), nil
+			})
+			if err := c.DeleteCredential(context.Background(), "config-index:"+provider+":stable"); err != nil || !deleted {
+				t.Fatalf("delete=%v err=%v", deleted, err)
+			}
+		})
+	}
+}
+
 func privateClient(t *testing.T, handler transportFunc) *Client {
 	t.Helper()
 	return &Client{root: t.TempDir(), state: manifest{Port: 12345, ControlKey: strings.Repeat("c", 64), InferenceKey: strings.Repeat("b", 64), TicketKey: strings.Repeat("a", 64)}, http: &http.Client{Transport: handler, Timeout: time.Second}}
