@@ -17,8 +17,8 @@ export async function fetchProviderAccounts(): Promise<ProviderAccounts> {
 export function useProviderAccounts(enabled = true) {
 	return useQuery({ queryKey: providerAccountsKey, queryFn: fetchProviderAccounts, enabled, refetchInterval: 30000, retry: 1 });
 }
-export async function setCodexQuotaAutoSwitch(enabled: boolean): Promise<ProviderAccounts> {
-	const result = await apiClient.PATCH("/api/v1/provider-accounts/quota-auto-switch", { body: { enabled } });
+export async function setQuotaAutoSwitch(provider: "codex" | "claude", enabled: boolean): Promise<ProviderAccounts> {
+	const result = await apiClient.PATCH("/api/v1/provider-accounts/quota-auto-switch", { body: { provider, enabled } });
 	if (result.error) throw new Error(apiErrorMessage(result.error));
 	return result.data!;
 }

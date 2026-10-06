@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -130,6 +131,26 @@ func TestProviderLoginAllowsIndependentProvidersButOneAttemptEach(t *testing.T) 
 	}
 	if resumed, err := l.Start(h.ctx, "claude", ""); err != nil || resumed.ID != claude.ID {
 		t.Fatalf("codex cancellation changed Claude login: %+v %v", resumed, err)
+	}
+}
+
+func TestProviderLoginStatusFailureAfterDeadlineBecomesTerminal(t *testing.T) {
+	h, l, p := loginCoordinatorHarness(t)
+	login, err := l.Start(h.ctx, "codex", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.fail = "status"
+	l.now = func() time.Time { return time.Now().Add(7 * time.Minute) }
+	result, err := l.Status(h.ctx, login.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("expired login remained active: %+v", result)
+	}
+	if len(p.cancels) != 1 {
+		t.Fatalf("expired login was not cancelled: %v", p.cancels)
 	}
 }
 func TestProviderLoginCancellationIsIdempotentAndKeepsInventory(t *testing.T) {

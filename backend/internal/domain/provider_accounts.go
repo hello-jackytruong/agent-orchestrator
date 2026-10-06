@@ -48,12 +48,14 @@ type ProviderSessionRoute struct {
 // ProviderAccountState contains only durable routing facts. A primary entry,
 // even when empty, records deliberate adoption of managed routing.
 type ProviderAccountState struct {
-	Revision               int64                  `json:"revision"`
-	Accounts               []ProviderAccount      `json:"accounts"`
-	Primaries              []ProviderPrimary      `json:"primaries"`
-	Routes                 []ProviderSessionRoute `json:"routes"`
-	CodexQuotaAutoSwitch   bool                   `json:"codex_quota_auto_switch,omitempty"`
-	CodexPrimaryGeneration int64                  `json:"codex_primary_generation,omitempty"`
+	Revision                int64                  `json:"revision"`
+	Accounts                []ProviderAccount      `json:"accounts"`
+	Primaries               []ProviderPrimary      `json:"primaries"`
+	Routes                  []ProviderSessionRoute `json:"routes"`
+	CodexQuotaAutoSwitch    bool                   `json:"codex_quota_auto_switch,omitempty"`
+	CodexPrimaryGeneration  int64                  `json:"codex_primary_generation,omitempty"`
+	ClaudeQuotaAutoSwitch   bool                   `json:"claude_quota_auto_switch,omitempty"`
+	ClaudePrimaryGeneration int64                  `json:"claude_primary_generation,omitempty"`
 }
 
 // ProviderAccountIntent survives a lost helper acknowledgement or daemon exit.

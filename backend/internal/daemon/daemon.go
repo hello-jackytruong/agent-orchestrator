@@ -614,7 +614,7 @@ func Run() error {
 	if err := providerAccounts.RestoreHost(ctx); err != nil {
 		log.Warn("managed account recovery requires attention", "error", err)
 	}
-	if err := providerAccounts.ProcessCodexQuotaEvents(ctx); err != nil {
+	if err := providerAccounts.ProcessQuotaEvents(ctx); err != nil {
 		log.Debug("managed account quota recovery is not ready", "error", err)
 	}
 	go func() {
@@ -631,7 +631,7 @@ func Run() error {
 					log.Warn("managed account helper requires attention", "error", failure)
 				}
 				reported = failure != nil
-				if quotaErr := providerAccounts.ProcessCodexQuotaEvents(ctx); quotaErr != nil && ctx.Err() == nil {
+				if quotaErr := providerAccounts.ProcessQuotaEvents(ctx); quotaErr != nil && ctx.Err() == nil {
 					log.Debug("managed account quota recovery failed", "error", quotaErr)
 				}
 			}

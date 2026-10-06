@@ -2990,15 +2990,17 @@ type ProviderPrimaryView struct {
 
 // ProviderAccountsResponse contains the account catalogue, defaults, and recovery state.
 type ProviderAccountsResponse struct {
-	CodexQuotaAutoSwitch bool                  `json:"codexQuotaAutoSwitch,omitempty"`
-	Accounts             []ProviderAccountView `json:"accounts"`
-	Defaults             []ProviderPrimaryView `json:"defaults"`
-	RecoveryRequired     bool                  `json:"recoveryRequired"`
+	CodexQuotaAutoSwitch  bool                  `json:"codexQuotaAutoSwitch,omitempty"`
+	ClaudeQuotaAutoSwitch bool                  `json:"claudeQuotaAutoSwitch,omitempty"`
+	Accounts              []ProviderAccountView `json:"accounts"`
+	Defaults              []ProviderPrimaryView `json:"defaults"`
+	RecoveryRequired      bool                  `json:"recoveryRequired"`
 }
 
 // UpdateCodexQuotaAutoSwitchRequest changes automatic primary recovery.
 type UpdateCodexQuotaAutoSwitchRequest struct {
-	Enabled *bool `json:"enabled"`
+	Provider string `json:"provider,omitempty" enum:"codex,claude"`
+	Enabled  *bool  `json:"enabled"`
 }
 
 // ProviderAccountChangeRequest selects an account or a replacement primary for an account operation.

@@ -3409,7 +3409,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Service Unavailable
-      summary: Set the default and optionally move existing Codex sessions
+      summary: Set the default and optionally move existing provider sessions
       tags:
       - agents
   /api/v1/provider-accounts/{accountId}/sign-out:
@@ -3568,7 +3568,7 @@ paths:
       - agents
   /api/v1/provider-accounts/quota-auto-switch:
     patch:
-      operationId: setCodexQuotaAutoSwitch
+      operationId: setQuotaAutoSwitch
       requestBody:
         content:
           application/json:
@@ -3606,7 +3606,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Service Unavailable
-      summary: Enable or disable automatic Codex quota primary switching
+      summary: Enable or disable automatic provider quota primary switching
       tags:
       - agents
   /api/v1/prs/{id}/merge:
@@ -13246,6 +13246,8 @@ components:
           items:
             $ref: '#/components/schemas/ProviderAccountView'
           type: array
+        claudeQuotaAutoSwitch:
+          type: boolean
         codexQuotaAutoSwitch:
           type: boolean
         defaults:
@@ -15121,6 +15123,11 @@ components:
           type:
           - "null"
           - boolean
+        provider:
+          enum:
+          - codex
+          - claude
+          type: string
       required:
       - enabled
       type: object

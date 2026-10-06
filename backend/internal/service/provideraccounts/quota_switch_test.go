@@ -36,7 +36,7 @@ func TestCodexQuotaAutoSwitchMovesPreviousPrimaryRoutesAndLeavesOtherAccounts(t 
 		t.Fatal(err)
 	}
 	h.proxy.quotaEvents = []ports.ProviderQuotaEvent{{ID: "quota-a", AuthID: "a@test.example-auth", ResetAt: time.Now().Add(time.Hour).Unix()}}
-	if err := h.svc.ProcessCodexQuotaEvents(h.ctx); err != nil {
+	if err := h.svc.ProcessQuotaEvents(h.ctx); err != nil {
 		t.Fatal(err)
 	}
 	for _, session := range []string{"default", "explicit-a"} {
@@ -62,11 +62,11 @@ func TestCodexQuotaAutoSwitchIgnoresStaleAndUnavailableEvents(t *testing.T) {
 	if err := h.svc.SetCodexQuotaAutoSwitch(h.ctx, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.svc.ProcessCodexQuotaEvents(h.ctx); err != nil {
+	if err := h.svc.ProcessQuotaEvents(h.ctx); err != nil {
 		t.Fatal(err)
 	}
 	h.proxy.quotaEvents = []ports.ProviderQuotaEvent{{ID: "stale", AuthID: "unknown"}, {ID: "expired", AuthID: "a@test.example-auth", ResetAt: time.Now().Add(-time.Minute).Unix()}}
-	if err := h.svc.ProcessCodexQuotaEvents(h.ctx); err != nil {
+	if err := h.svc.ProcessQuotaEvents(h.ctx); err != nil {
 		t.Fatal(err)
 	}
 	state, err := h.svc.State(h.ctx)
@@ -86,7 +86,7 @@ func TestCodexQuotaAutoSwitchDisabledLeavesPendingEventAndPrimaryUnchanged(t *te
 	a := h.login(t, "codex", "a@test.example")
 	h.login(t, "codex", "b@test.example")
 	h.proxy.quotaEvents = []ports.ProviderQuotaEvent{{ID: "quota-a", AuthID: "a@test.example-auth"}}
-	if err := h.svc.ProcessCodexQuotaEvents(h.ctx); err != nil {
+	if err := h.svc.ProcessQuotaEvents(h.ctx); err != nil {
 		t.Fatal(err)
 	}
 	state, err := h.svc.State(h.ctx)
@@ -109,7 +109,7 @@ func TestCodexQuotaAutoSwitchDoesNotFilterReplacementByPendingQuota(t *testing.T
 		{ID: "quota-a", AuthID: "a@test.example-auth"},
 		{ID: "quota-b", AuthID: "b@test.example-auth"},
 	}
-	if err := h.svc.ProcessCodexQuotaEvents(h.ctx); err != nil {
+	if err := h.svc.ProcessQuotaEvents(h.ctx); err != nil {
 		t.Fatal(err)
 	}
 	state, err := h.svc.State(h.ctx)
@@ -162,7 +162,7 @@ func TestCodexQuotaAutoSwitchRejectsDelayedEventAfterPrimaryCycles(t *testing.T)
 		t.Fatal(err)
 	}
 	h.proxy.quotaEvents = []ports.ProviderQuotaEvent{{ID: "delayed", AuthID: "a@test.example-auth", Generation: generation}}
-	if err := h.svc.ProcessCodexQuotaEvents(h.ctx); err != nil {
+	if err := h.svc.ProcessQuotaEvents(h.ctx); err != nil {
 		t.Fatal(err)
 	}
 	state, _ = h.svc.State(h.ctx)
@@ -171,5 +171,40 @@ func TestCodexQuotaAutoSwitchRejectsDelayedEventAfterPrimaryCycles(t *testing.T)
 	}
 	if len(h.proxy.quotaEvents) != 0 {
 		t.Fatal("delayed event was not acknowledged")
+	}
+}
+
+func TestClaudeQuotaAutoSwitchRequiresTwoSignedInAccounts(t *testing.T) {
+	h := setupAccounts(t)
+	h.login(t, "claude", "a@test.example")
+	if err := h.svc.SetClaudeQuotaAutoSwitch(h.ctx, true); !errors.Is(err, ports.ErrProviderQuotaSwitchRequiresReplacement) {
+		t.Fatalf("enable with one Claude account error=%v", err)
+	}
+}
+
+func TestClaudeQuotaAutoSwitchMovesPreviousPrimaryRoutes(t *testing.T) {
+	h := setupAccounts(t)
+	a := h.login(t, "claude", "a@test.example")
+	b := h.login(t, "claude", "b@test.example")
+	c := h.login(t, "claude", "c@test.example")
+	h.assign(t, "default", domain.HarnessClaudeCode, a)
+	h.assign(t, "explicit-a", domain.HarnessClaudeCode, a)
+	h.assign(t, "other", domain.HarnessClaudeCode, c)
+	if err := h.svc.SetClaudeQuotaAutoSwitch(h.ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	h.proxy.quotaEvents = []ports.ProviderQuotaEvent{{ID: "quota-claude-a", Provider: "claude", AuthID: "a@test.example-auth", ResetAt: time.Now().Add(time.Hour).Unix()}}
+	if err := h.svc.ProcessQuotaEvents(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.route(t, "default", b)
+	h.route(t, "explicit-a", b)
+	h.route(t, "other", c)
+	state, err := h.svc.State(h.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := primary(state, "claude"); got != b {
+		t.Fatalf("Claude primary=%q, want %q", got, b)
 	}
 }

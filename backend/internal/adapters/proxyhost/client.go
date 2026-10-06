@@ -276,14 +276,14 @@ func (c *Client) ApplyRoutes(ctx context.Context, snapshot ports.ProviderRouteSn
 	if err := c.call(ctx, http.MethodPut, "/ao/routes", snapshot, &acknowledged, nil); err != nil {
 		return err
 	}
-	if acknowledged.Revision != snapshot.Revision || !slices.Equal(acknowledged.Routes, snapshot.Routes) || !slices.Equal(acknowledged.AuthIDs, snapshot.AuthIDs) || acknowledged.CodexPrimaryGeneration != snapshot.CodexPrimaryGeneration {
+	if acknowledged.Revision != snapshot.Revision || !slices.Equal(acknowledged.Routes, snapshot.Routes) || !slices.Equal(acknowledged.AuthIDs, snapshot.AuthIDs) || acknowledged.CodexPrimaryGeneration != snapshot.CodexPrimaryGeneration || acknowledged.ClaudePrimaryGeneration != snapshot.ClaudePrimaryGeneration {
 		return errors.New("proxy routing acknowledgement does not match the requested snapshot")
 	}
 	return nil
 }
 
-// QuotaEvents returns provider-confirmed Codex usage-limit events waiting for
-// AO to decide whether the primary should move.
+// QuotaEvents returns provider-confirmed account quota events waiting for AO
+// to decide whether the primary should move.
 func (c *Client) QuotaEvents(ctx context.Context) ([]ports.ProviderQuotaEvent, error) {
 	if err := c.Ensure(ctx); err != nil {
 		return nil, err

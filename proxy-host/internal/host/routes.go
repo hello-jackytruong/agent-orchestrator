@@ -26,22 +26,24 @@ type Route struct {
 	AuthID     string `json:"auth_id"`
 }
 type Snapshot struct {
-	Revision               uint64   `json:"revision"`
-	Routes                 []Route  `json:"routes"`
-	AuthIDs                []string `json:"auth_ids,omitempty"`
-	RequestBoundary        bool     `json:"request_boundary,omitempty"`
-	CodexPrimaryGeneration int64    `json:"codex_primary_generation,omitempty"`
+	Revision                uint64   `json:"revision"`
+	Routes                  []Route  `json:"routes"`
+	AuthIDs                 []string `json:"auth_ids,omitempty"`
+	RequestBoundary         bool     `json:"request_boundary,omitempty"`
+	CodexPrimaryGeneration  int64    `json:"codex_primary_generation,omitempty"`
+	ClaudePrimaryGeneration int64    `json:"claude_primary_generation,omitempty"`
 }
 
 type QuotaEvent struct {
 	ID         string `json:"id"`
+	Provider   string `json:"provider,omitempty"`
 	AuthID     string `json:"auth_id"`
 	ResetAt    int64  `json:"reset_at,omitempty"`
 	Generation int64  `json:"generation,omitempty"`
 }
 
 // Routes serializes durable snapshots with request admission. In-flight requests
-// retain their selected account; Codex rebinds may apply at the next request.
+// retain their selected account; provider rebinds may apply at the next request.
 type Routes struct {
 	mu         sync.Mutex
 	path       string
@@ -90,21 +92,38 @@ func OpenRoutes(path string) (*Routes, error) {
 }
 
 func (r *Routes) RecordQuota(authID string, resetAt time.Time) {
+	r.RecordProviderQuota("codex", authID, resetAt)
+}
+
+func (r *Routes) RecordProviderQuota(provider, authID string, resetAt time.Time) {
 	if authID == "" {
 		return
+	}
+	if provider == "" {
+		provider = "codex"
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, event := range r.quota {
-		if event.AuthID == authID {
+		eventProvider := event.Provider
+		if eventProvider == "" {
+			eventProvider = "codex"
+		}
+		if eventProvider == provider && event.AuthID == authID {
 			return
 		}
 	}
 	generation := r.snapshot.CodexPrimaryGeneration
+	if provider == "claude" {
+		generation = r.snapshot.ClaudePrimaryGeneration
+	}
 	if generation == 0 {
 		generation = 1
 	}
-	event := QuotaEvent{ID: TicketHash("quota:" + authID), AuthID: authID, Generation: generation}
+	event := QuotaEvent{ID: TicketHash("quota:" + provider + ":" + authID), Provider: provider, AuthID: authID, Generation: generation}
+	if provider == "codex" {
+		event.ID = TicketHash("quota:" + authID) // Preserve IDs held by older helpers.
+	}
 	if !resetAt.IsZero() {
 		event.ResetAt = resetAt.Unix()
 	}
@@ -180,8 +199,19 @@ func (r *Routes) Apply(s Snapshot) error {
 	if s.Revision == r.snapshot.Revision && string(old) == string(next) {
 		return nil
 	}
-	// Upgrade the pre-inventory snapshot without changing any route or revision.
-	bootstrap := !requestBoundary && r.snapshot.AuthIDs == nil && s.AuthIDs != nil && s.Revision == r.snapshot.Revision && slices.Equal(s.Routes, r.snapshot.Routes)
+	// Upgrade legacy metadata without changing routes, existing generations, or revision.
+	legacy := r.snapshot
+	if legacy.AuthIDs == nil {
+		legacy.AuthIDs = s.AuthIDs
+	}
+	if legacy.ClaudePrimaryGeneration == 0 {
+		legacy.ClaudePrimaryGeneration = s.ClaudePrimaryGeneration
+	}
+	upgraded, _ := json.Marshal(legacy)
+	// A snapshot that differs only by metadata introduced after the helper
+	// wrote its file is a safe replay, even when the caller is at a request
+	// boundary. There is no route or credential change to admit in this case.
+	bootstrap := string(upgraded) == string(next)
 	if s.Revision != r.snapshot.Revision+1 && !bootstrap {
 		return ErrRevision
 	}
@@ -193,7 +223,7 @@ func (r *Routes) Apply(s Snapshot) error {
 	for hash, route := range r.byTicket {
 		if index[hash] != route && r.active[route.SessionID] > 0 {
 			next := index[hash]
-			if requestBoundary && slices.Contains(s.AuthIDs, route.AuthID) && slices.Contains(s.AuthIDs, next.AuthID) && route.Provider == "codex" && next.Provider == route.Provider && next.SessionID == route.SessionID && next.TicketHash == route.TicketHash {
+			if requestBoundary && slices.Contains(s.AuthIDs, route.AuthID) && slices.Contains(s.AuthIDs, next.AuthID) && (route.Provider == "codex" || route.Provider == "claude") && next.Provider == route.Provider && next.SessionID == route.SessionID && next.TicketHash == route.TicketHash {
 				continue
 			}
 			return ErrBusy
@@ -206,6 +236,7 @@ func (r *Routes) Apply(s Snapshot) error {
 	r.snapshot.Routes = slices.Clone(s.Routes)
 	r.snapshot.AuthIDs = slices.Clone(s.AuthIDs)
 	r.snapshot.CodexPrimaryGeneration = s.CodexPrimaryGeneration
+	r.snapshot.ClaudePrimaryGeneration = s.ClaudePrimaryGeneration
 	r.byTicket = index
 	return nil
 }

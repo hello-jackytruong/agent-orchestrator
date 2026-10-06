@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, ChevronDown, Copy, FileUp, KeyRound, LogIn, LogOut, MonitorSmartphone, Plus, ShieldCheck, Trash2, UserRound, X } from "lucide-react";
-import { cancelProviderLogin, changeProviderAccount, fetchProviderLogin, providerAccountsKey, setCodexQuotaAutoSwitch, startProviderLogin, useProviderAccounts, type ProviderAccount, type ProviderLogin } from "../../hooks/useProviderAccounts";
+import { cancelProviderLogin, changeProviderAccount, fetchProviderLogin, providerAccountsKey, setQuotaAutoSwitch, startProviderLogin, useProviderAccounts, type ProviderAccount, type ProviderLogin } from "../../hooks/useProviderAccounts";
 import { aoBridge } from "../../lib/bridge";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -70,12 +70,13 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 	const [baseUrl, setBaseUrl] = useState("");
 	const [label, setLabel] = useState("");
 	const [copiedLoginValue, setCopiedLoginValue] = useState<"link" | "code" | null>(null);
+	const loginStatusFailures = useRef(0);
 	const accounts = query.data?.accounts ?? [];
-	const signedInCodexCount = accounts.filter(account => account.provider === "codex" && account.signedIn).length;
 	useEffect(() => {
 		if (!login || login.status !== "waiting") return;
 		let mounted = true;
 		let timer: ReturnType<typeof setTimeout>;
+		loginStatusFailures.current = 0;
 		const poll = async () => {
 			try {
 				const next = await fetchProviderLogin(login.id);
@@ -96,6 +97,10 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 					setLogin({ ...login, status: "failed" });
 					setChoiceProvider(null);
 					setMessage(t("providerAccounts.loginFailed"));
+				} else if (++loginStatusFailures.current >= 5) {
+					setLogin({ ...login, status: "failed" });
+					setChoiceProvider(null);
+					setMessage(t("providerAccounts.loginStatusFailed"));
 				} else { setMessage(error instanceof Error ? error.message : t("providerAccounts.loginStatusFailed")); timer = setTimeout(poll, 3000); }
 			}
 		};
@@ -148,9 +153,9 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 			cache.setQueryData(providerAccountsKey, await changeProviderAccount(account.id, "primary", undefined, moveExisting));
 			void cache.invalidateQueries({ queryKey: ["session-provider-account"] });
 			setPrimaryChange(null);
-			setMessage(t(moveExisting ? "providerAccounts.primaryRequestsChanged" : "providerAccounts.primaryChanged"));
+			setMessage(t(moveExisting ? "providerAccounts.primaryRequestsChanged" : "providerAccounts.primaryChanged", { provider: account.provider === "codex" ? "Codex" : "Claude" }));
 		});
-		return <Card role="group" aria-label={t("providerAccounts.confirmDefaultChange")} className="border-primary/30 bg-primary/[0.04] shadow-none"><div className="flex gap-3 p-4"><div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Check aria-hidden="true" className="size-4" /></div><div className="min-w-0 flex-1"><p className="font-medium">{t("providerAccounts.confirmDefault", { email: account.email })}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{t("providerAccounts.defaultScope")}</p><div className="mt-4 flex flex-wrap gap-2"><Button size="sm" disabled={pending} onClick={() => apply(false)}>{t("providerAccounts.newSessionsOnly")}</Button>{account.provider === "codex" ? <Button size="sm" variant="secondary" disabled={pending} onClick={() => apply(true)}>{t("providerAccounts.moveExistingSessions")}</Button> : null}<Button size="sm" variant="ghost" disabled={pending} onClick={() => setPrimaryChange(null)}>{t("confirm.cancel")}</Button></div></div></div></Card>;
+		return <Card role="group" aria-label={t("providerAccounts.confirmDefaultChange")} className="border-primary/30 bg-primary/[0.04] shadow-none"><div className="flex gap-3 p-4"><div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Check aria-hidden="true" className="size-4" /></div><div className="min-w-0 flex-1"><p className="font-medium">{t("providerAccounts.confirmDefault", { email: account.email })}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{t("providerAccounts.defaultScope")}</p><div className="mt-4 flex flex-wrap gap-2"><Button size="sm" disabled={pending} onClick={() => apply(false)}>{t("providerAccounts.newSessionsOnly")}</Button><Button size="sm" variant="secondary" disabled={pending} onClick={() => apply(true)}>{t("providerAccounts.moveExistingSessions")}</Button><Button size="sm" variant="ghost" disabled={pending} onClick={() => setPrimaryChange(null)}>{t("confirm.cancel")}</Button></div></div></div></Card>;
 	}
 	return <SettingsSection title={t("providerAccounts.title")} sectionId="accountManager" titleHidden={titleHidden}>
 		<div className="flex flex-col gap-4">
@@ -183,10 +188,10 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 					</div>
 
 					<div id={`provider-content-${provider}`} hidden={isCollapsed}>
-					{provider === "codex" ? <div className="mx-4 mt-4 flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-						<input className="mt-0.5 size-4 accent-primary" type="checkbox" checked={Boolean(query.data?.codexQuotaAutoSwitch)} disabled={pending || query.isLoading || signedInCodexCount < 2} aria-label={t("providerAccounts.quotaAutoSwitch")} aria-describedby={signedInCodexCount < 2 ? "provider-accounts-quota-auto-switch-info" : undefined} onChange={event => void run(async () => { cache.setQueryData(providerAccountsKey, await setCodexQuotaAutoSwitch(event.target.checked)); })} />
-						<div className="min-w-0 flex-1"><p className="text-xs font-medium text-foreground">{t("providerAccounts.quotaAutoSwitch")}</p>{signedInCodexCount < 2 ? <p id="provider-accounts-quota-auto-switch-info" className="mt-1 flex items-center gap-1.5 text-2xs text-muted-foreground"><AlertCircle role="img" aria-label={t("providerAccounts.quotaAutoSwitchRequiresAccount")} className="size-3" />{t("providerAccounts.quotaAutoSwitchRequiresAccount")}</p> : null}</div>
-					</div> : null}
+					<div className="mx-4 mt-4 flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
+						<input className="mt-0.5 size-4 accent-primary" type="checkbox" checked={Boolean(provider === "codex" ? query.data?.codexQuotaAutoSwitch : query.data?.claudeQuotaAutoSwitch)} disabled={pending || query.isLoading || signedInCount < 2} aria-label={t("providerAccounts.quotaAutoSwitch", { provider: providerName })} aria-describedby={signedInCount < 2 ? `provider-accounts-${provider}-quota-auto-switch-info` : undefined} onChange={event => void run(async () => { cache.setQueryData(providerAccountsKey, await setQuotaAutoSwitch(provider, event.target.checked)); })} />
+						<div className="min-w-0 flex-1"><p className="text-xs font-medium text-foreground">{t("providerAccounts.quotaAutoSwitch", { provider: providerName })}</p>{signedInCount < 2 ? <p id={`provider-accounts-${provider}-quota-auto-switch-info`} className="mt-1 flex items-center gap-1.5 text-2xs text-muted-foreground"><AlertCircle role="img" aria-label={t("providerAccounts.quotaAutoSwitchRequiresAccount", { provider: providerName })} className="size-3" />{t("providerAccounts.quotaAutoSwitchRequiresAccount", { provider: providerName })}</p> : null}</div>
+					</div>
 
 					{choiceProvider === provider ? <div role="group" aria-label={`${provider} sign-in methods`} className="mx-4 mb-4 mt-3 rounded-lg border border-primary/25 bg-primary/[0.04] p-3">
 						<div className="mb-3 flex items-start gap-2"><KeyRound aria-hidden="true" className="mt-0.5 size-4 text-primary" /><div className="min-w-0 flex-1"><p className="text-xs font-medium">Add a {providerName} account</p><p className="mt-0.5 text-2xs text-muted-foreground">Choose the sign-in method that matches your account.</p></div><Button size="icon" variant="ghost" className="-mr-1 -mt-1 size-7 shrink-0" aria-label={t("common.close")} title={t("common.close")} disabled={login?.status === "waiting"} onClick={() => { setChoiceProvider(null); setApiKeyOpen(false); }}><X aria-hidden="true" className="size-4" /></Button></div>

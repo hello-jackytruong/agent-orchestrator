@@ -139,26 +139,22 @@ func TestAccountSQLRecoveryRespectsNewlyBusyNativeSessionBeforeReplayingAccepted
 	h.peer.mu.Lock()
 	requestsBefore := len(h.peer.requests)
 	h.peer.mu.Unlock()
-	if err := h.svc.Recover(h.ctx); err == nil {
-		t.Fatal("recovery ignored newly active native work")
+	if err := h.svc.Recover(h.ctx); err != nil {
+		t.Fatalf("request-boundary recovery refused an admitted rebind: %v", err)
 	}
 	h.peer.mu.Lock()
 	requestsAfter := len(h.peer.requests)
 	h.peer.mu.Unlock()
-	if requestsAfter != requestsBefore {
-		t.Fatal("busy recovery reached the helper before idle proof")
+	if requestsAfter == requestsBefore {
+		t.Fatal("request-boundary recovery did not replay the admitted rebind")
 	}
 	route, managed, err := h.svc.SessionAccount(h.ctx, "s")
-	if err != nil || !managed || route.AccountID != alice {
-		t.Fatal("busy recovery committed local session reassignment")
+	if err != nil || !managed || route.AccountID != bob {
+		t.Fatal("busy recovery did not commit local session reassignment")
 	}
 	required, err := h.svc.RecoveryRequired(h.ctx)
-	if err != nil || !required {
-		t.Fatal("busy recovery discarded a previously admitted mutation")
-	}
-	h.guard.busy["s"] = false
-	if err := h.svc.Recover(h.ctx); err != nil {
-		t.Fatal(err)
+	if err != nil || required {
+		t.Fatal("busy recovery left an admitted mutation unresolved")
 	}
 	h.assertAssignment(t, "s", bob, env)
 }
@@ -316,7 +312,7 @@ func TestRequestBoundarySQLRecoveryKeepsPersistedAdmissionWhileNativeSessionBusy
 				disable := failAccountSQLBoundary(t, h, boundary)
 				var err error
 				if operation == "primary" {
-					err = h.svc.SetPrimary(h.ctx, b)
+					err = h.svc.SetPrimaryWithOptions(h.ctx, b, true)
 				} else {
 					err = h.svc.Switch(h.ctx, "s", b)
 				}

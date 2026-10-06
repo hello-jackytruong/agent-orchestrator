@@ -111,6 +111,15 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	if mode, ok := c.Svc.(interface {
+		ClaudeQuotaAutoSwitch(context.Context) (bool, error)
+	}); ok {
+		result.ClaudeQuotaAutoSwitch, err = mode.ClaudeQuotaAutoSwitch(r.Context())
+		if err != nil {
+			envelope.WriteError(w, r, accountAPIError(err))
+			return
+		}
+	}
 	pending, err := c.Svc.RecoveryRequired(r.Context())
 	if err != nil {
 		envelope.WriteError(w, r, err)
@@ -159,19 +168,38 @@ func (c *ProviderAccountsController) setQuotaAutoSwitch(w http.ResponseWriter, r
 	if !c.ready(w, r) {
 		return
 	}
-	setter, ok := c.Svc.(interface {
-		SetCodexQuotaAutoSwitch(context.Context, bool) error
-	})
-	if !ok {
-		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "service_unavailable", "PROVIDER_ACCOUNTS_UNAVAILABLE", "Quota switching is unavailable in this build", nil)
-		return
-	}
 	var input UpdateCodexQuotaAutoSwitchRequest
 	if err := decodeAccountJSON(r, &input); err != nil || input.Enabled == nil {
 		envelope.WriteError(w, r, apierr.Invalid("QUOTA_AUTO_SWITCH_INVALID", "enabled must be true or false", nil))
 		return
 	}
-	if err := setter.SetCodexQuotaAutoSwitch(r.Context(), *input.Enabled); err != nil {
+	provider := strings.TrimSpace(input.Provider)
+	if provider == "" {
+		provider = "codex"
+	}
+	var setter func(context.Context, bool) error
+	switch provider {
+	case "codex":
+		if service, ok := c.Svc.(interface {
+			SetCodexQuotaAutoSwitch(context.Context, bool) error
+		}); ok {
+			setter = service.SetCodexQuotaAutoSwitch
+		}
+	case "claude":
+		if service, ok := c.Svc.(interface {
+			SetClaudeQuotaAutoSwitch(context.Context, bool) error
+		}); ok {
+			setter = service.SetClaudeQuotaAutoSwitch
+		}
+	default:
+		envelope.WriteError(w, r, apierr.Invalid("PROVIDER_REQUIRED", "Choose Codex or Claude", nil))
+		return
+	}
+	if setter == nil {
+		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "service_unavailable", "PROVIDER_ACCOUNTS_UNAVAILABLE", "Quota switching is unavailable in this build", nil)
+		return
+	}
+	if err := setter(r.Context(), *input.Enabled); err != nil {
 		envelope.WriteError(w, r, accountAPIError(err))
 		return
 	}

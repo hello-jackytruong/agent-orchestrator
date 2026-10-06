@@ -321,12 +321,8 @@ func TestAccountWireLifecyclePreservesTwoProvidersAndNativeSessionsAcrossRestart
 	h.assertAssignment(t, "claude-old", clara, claudeEnv)
 	h.assertAssignment(t, "codex-new", bob, newCodexEnv)
 	h.assertAssignment(t, "claude-new", dan, newClaudeEnv)
-	if err := h.svc.Switch(h.ctx, "codex-old", bob); !errors.Is(err, ports.ErrProviderAccountBusy) {
-		t.Fatalf("active manual switch=%v", err)
-	}
-	h.guard.busy["codex-old"] = false
 	if err := h.svc.Switch(h.ctx, "codex-old", bob); err != nil {
-		t.Fatal(err)
+		t.Fatalf("active request-boundary switch=%v", err)
 	}
 	h.assertAssignment(t, "codex-old", bob, codexEnv)
 	h.assertAssignment(t, "claude-old", clara, claudeEnv)
@@ -337,6 +333,9 @@ func TestAccountWireLifecyclePreservesTwoProvidersAndNativeSessionsAcrossRestart
 	if err != nil || native != nil {
 		t.Fatal("account management changed an older native session")
 	}
+	// Destructive credential removal still waits for the active request to finish;
+	// request-boundary rebinding above does not need that native idle fence.
+	h.guard.busy["codex-old"] = false
 	if err := h.svc.Remove(h.ctx, bob, alice, true); err != nil {
 		t.Fatal(err)
 	}

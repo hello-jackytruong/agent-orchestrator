@@ -644,3 +644,21 @@ func TestProviderAccountCancelledGateAdmission(t *testing.T) {
 		t.Fatal("cancelled caller admitted intent")
 	}
 }
+
+func TestProviderAccountClaudeDefaultCanMoveExistingRoutes(t *testing.T) {
+	h := setupAccounts(t)
+	a := h.login(t, "claude", "alice@example.com")
+	b := h.login(t, "claude", "bob@example.com")
+	h.assign(t, "claude-a", domain.HarnessClaudeCode, a)
+	if err := h.svc.SetPrimaryWithOptions(h.ctx, b, true); err != nil {
+		t.Fatal(err)
+	}
+	h.route(t, "claude-a", b)
+	state, err := h.svc.State(h.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := primary(state, "claude"); got != b {
+		t.Fatalf("primary=%q, want %q", got, b)
+	}
+}

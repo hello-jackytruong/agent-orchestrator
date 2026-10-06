@@ -125,7 +125,7 @@ func TestRequestBoundaryCannotChangeCapabilityProviderOrRevokeBusyRoute(t *testi
 					next.AuthIDs = nil
 				}
 				err = routes.Apply(next)
-				if provider == "codex" && mutation == "rebind" {
+				if mutation == "rebind" {
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -297,6 +297,27 @@ func TestRequestBoundaryUpgradeBootstrapsInventoryWithoutRebinding(t *testing.T)
 				t.Fatal("same revision allowed inventory retirement")
 			}
 		})
+	}
+}
+
+func TestRequestBoundaryUpgradeReplaysLegacyClaudeGeneration(t *testing.T) {
+	r := testRoutes(t)
+	old := testRoute("s", "ticket", "claude", "claude-a")
+	if err := r.Apply(Snapshot{Revision: 1, Routes: []Route{old}, AuthIDs: []string{"claude-a"}}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := OpenRoutes(r.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := r.Snapshot()
+	next.ClaudePrimaryGeneration = 1
+	next.RequestBoundary = true
+	if err := r.Apply(next); err != nil {
+		t.Fatalf("legacy metadata replay failed: %v", err)
+	}
+	if got := r.Snapshot(); got.ClaudePrimaryGeneration != 1 || got.Revision != 1 || !reflect.DeepEqual(got.Routes, []Route{old}) {
+		t.Fatalf("replay changed effective routing: %+v", got)
 	}
 }
 

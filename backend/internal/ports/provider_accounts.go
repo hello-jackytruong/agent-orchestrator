@@ -19,15 +19,15 @@ var ErrProviderLoginCallbackBusy = errors.New("login callback port is in use; fi
 // ErrProviderLoginRequired reports an account without usable saved credentials.
 var ErrProviderLoginRequired = errors.New("provider account login required")
 
-// ErrProviderAccountBusy refuses routing changes while affected sessions are working.
-var ErrProviderAccountBusy = errors.New("sessions are using this account; wait until they are idle")
+// ErrProviderAccountBusy refuses destructive changes while affected sessions are working.
+var ErrProviderAccountBusy = errors.New("this account is still in use; try again when its sessions have finished")
 
 // ErrProviderPrimaryRequired requires a replacement before removing a usable primary.
 var ErrProviderPrimaryRequired = errors.New("choose a replacement primary account first")
 
 // ErrProviderQuotaSwitchRequiresReplacement prevents enabling automatic quota
-// recovery without a second signed-in Codex account to receive new requests.
-var ErrProviderQuotaSwitchRequiresReplacement = errors.New("automatic quota switching requires a second signed-in Codex account")
+// recovery without a second signed-in account to receive new requests.
+var ErrProviderQuotaSwitchRequiresReplacement = errors.New("automatic quota switching requires a second signed-in account")
 
 // ErrProviderAccountUnknown reports an account absent from the catalogue.
 var ErrProviderAccountUnknown = errors.New("provider account not found")
@@ -48,16 +48,18 @@ type ProviderAccountStore interface {
 
 // ProviderRouteSnapshot is the complete revisioned helper routing table.
 type ProviderRouteSnapshot struct {
-	Revision               int64           `json:"revision"`
-	Routes                 []ProviderRoute `json:"routes"`
-	AuthIDs                []string        `json:"auth_ids,omitempty"`
-	RequestBoundary        bool            `json:"request_boundary,omitempty"`
-	CodexPrimaryGeneration int64           `json:"codex_primary_generation,omitempty"`
+	Revision                int64           `json:"revision"`
+	Routes                  []ProviderRoute `json:"routes"`
+	AuthIDs                 []string        `json:"auth_ids,omitempty"`
+	RequestBoundary         bool            `json:"request_boundary,omitempty"`
+	CodexPrimaryGeneration  int64           `json:"codex_primary_generation,omitempty"`
+	ClaudePrimaryGeneration int64           `json:"claude_primary_generation,omitempty"`
 }
 
 // ProviderQuotaEvent reports a provider-confirmed account usage limit.
 type ProviderQuotaEvent struct {
 	ID         string `json:"id"`
+	Provider   string `json:"provider,omitempty"`
 	AuthID     string `json:"auth_id"`
 	ResetAt    int64  `json:"reset_at,omitempty"`
 	Generation int64  `json:"generation,omitempty"`

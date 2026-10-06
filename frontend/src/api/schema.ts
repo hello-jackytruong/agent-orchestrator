@@ -1269,7 +1269,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set the default and optionally move existing Codex sessions */
+        /** Set the default and optionally move existing provider sessions */
         put: operations["setProviderPrimary"];
         post?: never;
         delete?: never;
@@ -1343,8 +1343,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Enable or disable automatic Codex quota primary switching */
-        patch: operations["setCodexQuotaAutoSwitch"];
+        /** Enable or disable automatic provider quota primary switching */
+        patch: operations["setQuotaAutoSwitch"];
         trace?: never;
     };
     "/api/v1/prs/{id}/merge": {
@@ -4550,6 +4550,7 @@ export interface components {
         };
         ProviderAccountsResponse: {
             accounts: components["schemas"]["ProviderAccountView"][];
+            claudeQuotaAutoSwitch?: boolean;
             codexQuotaAutoSwitch?: boolean;
             defaults: components["schemas"]["ProviderPrimaryView"][];
             recoveryRequired: boolean;
@@ -5277,6 +5278,8 @@ export interface components {
         };
         UpdateCodexQuotaAutoSwitchRequest: {
             enabled: null | boolean;
+            /** @enum {string} */
+            provider?: "codex" | "claude";
         };
         UpdateProjectSettingsInput: {
             config: components["schemas"]["ProjectConfig"];
@@ -10211,7 +10214,7 @@ export interface operations {
             };
         };
     };
-    setCodexQuotaAutoSwitch: {
+    setQuotaAutoSwitch: {
         parameters: {
             query?: never;
             header?: never;

@@ -206,6 +206,24 @@ func TestProviderAccountsHTTPFlowQuotaAutoSwitchPreference(t *testing.T) {
 	}
 }
 
+func TestProviderAccountsHTTPFlowClaudeQuotaAutoSwitchPreference(t *testing.T) {
+	f := newAccountHTTPFlow(t)
+	f.add(t, "claude", "alice@example.test")
+	f.add(t, "claude", "bob@example.test")
+	result := f.catalogue(t)
+	if result.ClaudeQuotaAutoSwitch {
+		t.Fatal("Claude quota auto-switch should default off")
+	}
+	out := accountHTTPRequest(t, f.controller, http.MethodPatch, "/provider-accounts/quota-auto-switch", `{"provider":"claude","enabled":true}`)
+	if out.Code != http.StatusOK {
+		t.Fatalf("enable status=%d body=%s", out.Code, out.Body.String())
+	}
+	result = f.catalogue(t)
+	if !result.ClaudeQuotaAutoSwitch {
+		t.Fatal("Claude quota auto-switch did not persist")
+	}
+}
+
 func TestProviderAccountsHTTPFlowQuotaAutoSwitchRequiresSecondAccount(t *testing.T) {
 	f := newAccountHTTPFlow(t)
 	f.add(t, "codex", "alice@example.test")
@@ -214,6 +232,24 @@ func TestProviderAccountsHTTPFlowQuotaAutoSwitchRequiresSecondAccount(t *testing
 		t.Fatalf("single-account enable status=%d body=%s", out.Code, out.Body.String())
 	}
 }
+
+func TestProviderAccountsHTTPFlowClaudeQuotaAutoSwitchRequiresSecondClaudeAccount(t *testing.T) {
+	f := newAccountHTTPFlow(t)
+	f.add(t, "claude", "alice@example.test")
+	out := accountHTTPRequest(t, f.controller, http.MethodPatch, "/provider-accounts/quota-auto-switch", `{"provider":"claude","enabled":true}`)
+	if out.Code != http.StatusConflict || !strings.Contains(out.Body.String(), "QUOTA_AUTO_SWITCH_REQUIRES_SECOND_ACCOUNT") {
+		t.Fatalf("single-Claude enable status=%d body=%s", out.Code, out.Body.String())
+	}
+}
+
+func TestProviderAccountsHTTPFlowQuotaAutoSwitchRejectsUnknownProvider(t *testing.T) {
+	f := newAccountHTTPFlow(t)
+	out := accountHTTPRequest(t, f.controller, http.MethodPatch, "/provider-accounts/quota-auto-switch", `{"provider":"gemini","enabled":true}`)
+	if out.Code != http.StatusBadRequest || !strings.Contains(out.Body.String(), "PROVIDER_REQUIRED") {
+		t.Fatalf("unknown-provider status=%d body=%s", out.Code, out.Body.String())
+	}
+}
+
 func TestProviderAccountsHTTPFlowPrimarySignOutRequiresReplacement(t *testing.T) {
 	f := newAccountHTTPFlow(t)
 	alice := f.add(t, "codex", "alice@example.test")

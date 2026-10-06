@@ -22,11 +22,11 @@ const bob: ProviderAccount = { id: "b", provider: "codex", email: "bob@example.t
 const clara: ProviderAccount = { id: "c", provider: "claude", email: "clara@example.test", signedIn: true, primary: true, sessions: [] };
 beforeEach(() => {
 	vi.clearAllMocks();
-	inventory = { accounts: [structuredClone(alice), structuredClone(bob), structuredClone(clara)], defaults: [{ provider: "codex", primaryId: "a", managed: true }, { provider: "claude", primaryId: "c", managed: true }], recoveryRequired: false, codexQuotaAutoSwitch: false };
+	inventory = { accounts: [structuredClone(alice), structuredClone(bob), structuredClone(clara)], defaults: [{ provider: "codex", primaryId: "a", managed: true }, { provider: "claude", primaryId: "c", managed: true }], recoveryRequired: false, codexQuotaAutoSwitch: false, claudeQuotaAutoSwitch: false };
 	mock.get.mockImplementation(async (path: string) => path === "/api/v1/provider-accounts" ? { data: inventory } : { data: { id: "login-1", provider: "codex", url: "https://provider.test/login", status: "waiting", accountId: "" } });
 	mock.post.mockResolvedValue({ data: inventory });
 	mock.put.mockResolvedValue({ data: inventory });
-	mock.patch.mockResolvedValue({ data: { ...inventory, codexQuotaAutoSwitch: true } });
+	mock.patch.mockResolvedValue({ data: { ...inventory, codexQuotaAutoSwitch: true, claudeQuotaAutoSwitch: true } });
 	mock.remove.mockResolvedValue({ data: inventory });
 	mock.open.mockResolvedValue(undefined);
 	mock.clipboard.mockResolvedValue(undefined);
@@ -83,7 +83,7 @@ describe("provider account inventory", () => {
 		expect(mock.put).not.toHaveBeenCalled();
 		await user.click(within(confirm).getByRole("button", { name: "New sessions only" }));
 		expect(mock.put).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/primary", { params: { path: { accountId: "b" } }, body: { moveExisting: false } });
-		expect(await screen.findByRole("status")).toHaveTextContent("Default changed. Existing sessions keep their account.");
+		expect(await screen.findByRole("status")).toHaveTextContent("Default changed. Existing Codex sessions keep their account.");
 		expect(within(accountRow(bob.email)).queryByRole("group", { name: "Confirm default change" })).toBeNull();
 		expect(mock.post).not.toHaveBeenCalled();
 		expect(mock.remove).not.toHaveBeenCalled();
@@ -101,7 +101,15 @@ describe("provider account inventory", () => {
 		renderAccounts();
 		const toggle = await screen.findByRole("checkbox", { name: /Automatically switch the Codex default/ });
 		await user.click(toggle);
-		expect(mock.patch).toHaveBeenCalledWith("/api/v1/provider-accounts/quota-auto-switch", { body: { enabled: true } });
+		expect(mock.patch).toHaveBeenCalledWith("/api/v1/provider-accounts/quota-auto-switch", { body: { provider: "codex", enabled: true } });
+	});
+	it("allows Claude quota auto-switching to be enabled", async () => {
+		inventory.accounts.push({ ...clara, id: "d", email: "claude-two@test.example", primary: false });
+		const user = userEvent.setup();
+		renderAccounts();
+		const toggle = await screen.findByRole("checkbox", { name: /Automatically switch the Claude/ });
+		await user.click(toggle);
+		expect(mock.patch).toHaveBeenCalledWith("/api/v1/provider-accounts/quota-auto-switch", { body: { provider: "claude", enabled: true } });
 	});
 	it("keeps quota auto-switch visible but disabled until a second Codex account is signed in", async () => {
 		inventory.accounts = [structuredClone(alice), structuredClone(clara)];
@@ -515,15 +523,15 @@ describe("primary request switching", () => {
   expect(mock.post).not.toHaveBeenCalled();
   expect(mock.remove).not.toHaveBeenCalled();
  });
- it("offers only new sessions for Claude defaults", async () => {
+ it("can move existing Claude sessions at the next request boundary", async () => {
   inventory.accounts.push({ ...clara, id: "d", email: "claude-two@test.example", primary: false });
   const user = userEvent.setup();
   renderAccounts();
   await screen.findByText("claude-two@test.example");
   await user.click(within(accountRow("claude-two@test.example")).getByRole("button", { name: "Use as default" }));
 	  const confirm = screen.getByRole("group", { name: "Confirm default change" });
-	  expect(within(confirm).queryByRole("button", { name: "Move existing sessions" })).toBeNull();
-	  await user.click(within(confirm).getByRole("button", { name: "New sessions only" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("Default changed. Existing sessions keep their account.");
+	  await user.click(within(confirm).getByRole("button", { name: "Move existing sessions" }));
+	  expect(mock.put).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}/primary", { params: { path: { accountId: "d" } }, body: { moveExisting: true } });
+	  expect(await screen.findByRole("status")).toHaveTextContent("Default changed. Claude sessions using the previous default will use this account for their next API request.");
  });
 });

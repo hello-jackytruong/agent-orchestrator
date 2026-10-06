@@ -9,23 +9,24 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
-// quotaResultPolicy turns only the provider's explicit Codex usage-limit
-// signal into a durable event. Rate limits, outages, auth failures, and other
-// errors remain ordinary request failures and never move AO's primary.
+// quotaResultPolicy turns only a provider-confirmed account-wide quota signal
+// into a durable event. Temporary rate limits, outages, auth failures, and
+// other errors remain ordinary request failures and never move AO's primary.
 type quotaResultPolicy struct{ routes *Routes }
 
 func (p quotaResultPolicy) ApplyResultPolicy(_ context.Context, result coreauth.Result) coreauth.Result {
-	if p.routes == nil || result.Provider != "codex" || result.Success || result.Error == nil {
+	if p.routes == nil || (result.Provider != "codex" && result.Provider != "claude") || result.Success || result.Error == nil {
 		return result
 	}
-	if !isCodexUsageLimitResult(result.Error) {
+	if (result.Provider == "codex" && !isCodexUsageLimitResult(result.Error)) ||
+		(result.Provider == "claude" && (!result.CredentialScope || result.Error.HTTPStatus != 429)) {
 		return result
 	}
 	resetAt := time.Time{}
 	if result.RetryAfter != nil && *result.RetryAfter > 0 {
 		resetAt = time.Now().Add(*result.RetryAfter)
 	}
-	p.routes.RecordQuota(result.AuthID, resetAt)
+	p.routes.RecordProviderQuota(result.Provider, result.AuthID, resetAt)
 	return result
 }
 

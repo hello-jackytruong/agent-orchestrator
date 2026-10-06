@@ -58,7 +58,7 @@ func TestRequestBoundaryPrimaryMovesOnlyPreviousCodexAccount(t *testing.T) {
 	h.route(t, "claude", claude)
 }
 
-func TestRequestBoundaryIndividualSwitchRetainsPrimaryAndClaudeProtection(t *testing.T) {
+func TestRequestBoundaryIndividualSwitchRetainsPrimaryForBothProviders(t *testing.T) {
 	for _, provider := range []string{"codex", "claude"} {
 		t.Run(provider, func(t *testing.T) {
 			h := setupAccounts(t)
@@ -87,10 +87,10 @@ func TestRequestBoundaryIndividualSwitchRetainsPrimaryAndClaudeProtection(t *tes
 				}
 				h.route(t, "working", b)
 			} else {
-				if !errors.Is(err, ports.ErrProviderAccountBusy) {
-					t.Fatalf("idle protection=%v", err)
+				if err != nil {
+					t.Fatal(err)
 				}
-				h.route(t, "working", a)
+				h.route(t, "working", b)
 			}
 			h.route(t, "other", a)
 			selected, _, err := h.svc.ResolveAccount(h.ctx, harness, "")
