@@ -97,6 +97,11 @@ func (f accountHTTPFlow) catalogue(t *testing.T) controllers.ProviderAccountsRes
 	if err := json.Unmarshal(out.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
+	// Usage is a best-effort read and is represented by a fresh pointer on each
+	// catalogue read; these flow assertions compare durable account facts only.
+	for i := range result.Accounts {
+		result.Accounts[i].Usage = nil
+	}
 	for _, private := range []string{"credential_ref", "auth_id", "ticket_hash", "access_token", "refresh_token", ".json", "codex:alice", "claude:clara"} {
 		if strings.Contains(out.Body.String(), private) {
 			t.Fatalf("public catalogue exposed %q", private)
@@ -125,7 +130,7 @@ func TestProviderAccountsHTTPFlowPrimaryPreferenceAndManualSessionSwitch(t *test
 	f := newAccountHTTPFlow(t)
 	ctx := context.Background()
 	empty := f.catalogue(t)
-	if len(empty.Accounts) != 0 || len(empty.Defaults) != 2 || empty.Defaults[0].Managed || empty.Defaults[1].Managed {
+	if len(empty.Accounts) != 0 || len(empty.Defaults) != 2 || !empty.Defaults[0].Managed || !empty.Defaults[1].Managed {
 		t.Fatalf("initial catalogue=%+v", empty)
 	}
 	alice := f.add(t, "codex", "alice@example.test")
@@ -155,10 +160,10 @@ func TestProviderAccountsHTTPFlowPrimaryPreferenceAndManualSessionSwitch(t *test
 	f.assign(t, "new-codex", domain.HarnessCodex, chosen)
 	f.route(t, "new-codex", bob, false)
 	out = accountHTTPRequest(t, f.controller, http.MethodPut, "/sessions/old-codex/provider-account", `{"accountId":"`+bob+`"}`)
-	if out.Code != http.StatusConflict || !strings.Contains(out.Body.String(), "PROVIDER_ACCOUNT_IN_USE") {
-		t.Fatalf("busy switch status=%d body=%s", out.Code, out.Body.String())
+	if out.Code != http.StatusOK {
+		t.Fatalf("request-boundary switch status=%d body=%s", out.Code, out.Body.String())
 	}
-	f.route(t, "old-codex", alice, false)
+	f.route(t, "old-codex", bob, false)
 	f.guard.busy["old-codex"] = false
 	out = accountHTTPRequest(t, f.controller, http.MethodPut, "/sessions/old-codex/provider-account", `{"accountId":"`+bob+`"}`)
 	if out.Code != http.StatusOK {

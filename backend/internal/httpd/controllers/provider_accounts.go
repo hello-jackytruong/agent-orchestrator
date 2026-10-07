@@ -135,8 +135,7 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 		usageByAccount = reader.AccountUsages(r.Context(), state.Accounts)
 	}
 	for _, provider := range []string{"codex", "claude"} {
-		id, managed := primaries[provider]
-		result.Defaults = append(result.Defaults, ProviderPrimaryView{Provider: provider, PrimaryID: id, Managed: managed})
+		result.Defaults = append(result.Defaults, ProviderPrimaryView{Provider: provider, PrimaryID: primaries[provider], Managed: true})
 	}
 	for _, a := range state.Accounts {
 		view := ProviderAccountView{ID: a.ID, Provider: a.Provider, Email: a.Email, Kind: a.Kind, SignedIn: a.CredentialRef != "", Primary: primaries[a.Provider] == a.ID, Sessions: []string{}}

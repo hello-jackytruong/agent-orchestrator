@@ -356,7 +356,10 @@ func eligible(state domain.ProviderAccountState, id, provider string) error {
 	return nil
 }
 
-// ResolveAccount chooses an explicit account or the matching primary for a new session.
+// ResolveAccount chooses an explicit account or the matching primary for a new
+// session. Codex and Claude are managed providers once this build is running:
+// native credentials are retained only for sessions created before adoption,
+// and must never be an implicit fallback for a new session.
 func (s *Service) ResolveAccount(ctx context.Context, harness domain.AgentHarness, explicit string) (string, bool, error) {
 	state, pending, err := s.store.LoadProviderAccountState(ctx)
 	if err != nil {
@@ -373,6 +376,9 @@ func (s *Service) ResolveAccount(ctx context.Context, harness domain.AgentHarnes
 		return "", false, nil
 	}
 	id, managed := primary(state, provider)
+	if provider == "codex" || provider == "claude" {
+		managed = true
+	}
 	if explicit != "" {
 		id = explicit
 		managed = true

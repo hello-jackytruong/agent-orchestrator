@@ -92,21 +92,21 @@ func TestManagedAccountSpawnCannotBypassMissingExecutable(t *testing.T) {
 		})
 	}
 }
-func TestNativeAccountSpawnStillUsesDeviceAuthenticationRules(t *testing.T) {
+func TestManagedProviderSpawnDoesNotFallBackToNativeAuthentication(t *testing.T) {
 	store := newFakeStore()
 	store.projects["project"] = domain.ProjectRecord{ID: "project"}
 	manager := &fakeCommander{}
-	routing := &serviceAccountRouting{managed: false}
+	routing := &serviceAccountRouting{managed: true, resolveErr: ports.ErrProviderLoginRequired}
 	readiness := &fakeAgentReadiness{snapshot: domain.AgentReadinessSnapshot{ID: "codex", Installation: domain.AgentInstallationObservation{State: domain.AgentInstallationInstalled}, Authentication: domain.AgentAuthenticationObservation{State: domain.AgentAuthenticationUnauthorized, Freshness: domain.AgentReadinessFresh}}}
 	service := NewWithDeps(Deps{Manager: manager, Store: store, AgentReadiness: readiness})
 	service.SetProviderAccounts(routing)
 	_, _, _, err := service.Spawn(context.Background(), ports.SpawnConfig{ProjectID: "project", Harness: domain.HarnessCodex, Kind: domain.KindWorker})
 	var apiError *apierr.Error
-	if !errors.As(err, &apiError) || apiError.Code != "CODEX_ACCOUNT_AUTH_UNVERIFIED" {
-		t.Fatalf("native auth error=%v", err)
+	if !errors.As(err, &apiError) || apiError.Code != "PROVIDER_LOGIN_REQUIRED" {
+		t.Fatalf("managed login error=%v", err)
 	}
 	if manager.spawnCalls != 0 || len(routing.calls) != 1 {
-		t.Fatal("native device authorization no longer controls unmanaged launch")
+		t.Fatal("managed provider fell back to native launch")
 	}
 }
 func TestManagedAccountSpawnRoutingErrorsReachAPIWithoutFallback(t *testing.T) {

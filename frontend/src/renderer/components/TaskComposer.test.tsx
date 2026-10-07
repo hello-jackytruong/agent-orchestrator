@@ -112,7 +112,17 @@ async function waitForTaskReady() {
 }
 
 beforeEach(() => {
-	h.providerInventory = { accounts: [], defaults: [], recoveryRequired: false };
+	h.providerInventory = {
+		accounts: [
+			{ id: "test-codex", provider: "codex", email: "codex@example.test", signedIn: true, primary: true, sessions: [] },
+			{ id: "test-claude", provider: "claude", email: "claude@example.test", signedIn: true, primary: true, sessions: [] },
+		],
+		defaults: [
+			{ provider: "codex", primaryId: "test-codex", managed: true },
+			{ provider: "claude", primaryId: "test-claude", managed: true },
+		],
+		recoveryRequired: false,
+	};
 	h.get.mockImplementation(async (path: string) => {
 		if (path.includes("/models")) {
 			return {
@@ -1819,7 +1829,7 @@ describe("new task provider account selection", () => {
 		render(<Wrap><TaskComposer projectId="__standalone__" onCreated={vi.fn()} /></Wrap>);
 		const select = await screen.findByRole("combobox", { name: "New session account" });
 		expect(select).toHaveValue("");
-		expect([...select.querySelectorAll("option")].map(option => option.textContent)).toEqual(["Primary: alice@example.test", "alice@example.test", "bob@example.test"]);
+		expect([...select.querySelectorAll("option")].map(option => option.textContent)).toEqual(["Default: alice@example.test", "alice@example.test", "bob@example.test"]);
 		expect(screen.queryByRole("option", { name: "clara@example.test" })).toBeNull();
 		expect(screen.queryByRole("option", { name: "signed-out@example.test" })).toBeNull();
 		expect(h.post).not.toHaveBeenCalled();
@@ -1859,7 +1869,7 @@ describe("new task provider account selection", () => {
 		fireEvent.click(screen.getByLabelText("Agent"));
 		const select = screen.getByRole("combobox", { name: "New session account" });
 		expect(select).toHaveValue("");
-		expect([...select.querySelectorAll("option")].map(option => option.textContent)).toEqual(["Primary: clara@example.test", "clara@example.test"]);
+		expect([...select.querySelectorAll("option")].map(option => option.textContent)).toEqual(["Default: clara@example.test", "clara@example.test"]);
 		h.ensureTargetedReadiness.mockResolvedValue({ agents: [agentReadiness("claude-code", "Claude")] });
 		await waitForTaskReady();
 		fireEvent.change(task(), { target: { value: "Use Claude" } });
@@ -1890,7 +1900,7 @@ describe("new task provider account selection", () => {
 		expect(startTask()).toBeDisabled();
 		act(() => cache.setQueryData(["provider-accounts"], managedInventory()));
 		await waitForTaskReady();
-		expect(screen.getByRole("option", { name: "Primary: alice@example.test" })).toBeInTheDocument();
+		expect(screen.getByRole("option", { name: "Default: alice@example.test" })).toBeInTheDocument();
 		expect(h.post).not.toHaveBeenCalled();
 	});
 	it("blocks a stale explicit selection after that account is removed", async () => {
@@ -1920,7 +1930,7 @@ describe("new task provider account selection", () => {
 		changed.accounts[0].primary = false;
 		changed.accounts[1].primary = true;
 		act(() => cache.setQueryData(["provider-accounts"], changed));
-		await waitFor(() => expect(screen.getByRole("option", { name: "Primary: bob@example.test" })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole("option", { name: "Default: bob@example.test" })).toBeInTheDocument());
 		await waitForTaskReady();
 		fireEvent.change(task(), { target: { value: "New primary" } });
 		fireEvent.click(startTask());
@@ -1943,7 +1953,7 @@ describe("new task provider account selection", () => {
 			{ provider: "codex", primaryId: "codex-secondary", managed: true },
 			{ provider: "claude", primaryId: "claude-primary", managed: true },
 		] };
-		expect(screen.getByRole("option", { name: "Primary: alice@example.test" })).toBeInTheDocument();
+		expect(screen.getByRole("option", { name: "Default: alice@example.test" })).toBeInTheDocument();
 		expect(h.post).not.toHaveBeenCalled();
 		await act(async () => ready({ agents: [agentReadiness("codex", "Codex")] }));
 		await waitFor(() => expect(onCreated).toHaveBeenCalledWith("new-session"));

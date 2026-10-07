@@ -17,12 +17,13 @@ import { agentLabel, AGENT_OPTIONS, type AgentId } from "../../lib/agent-options
 import { CLOUD_AGENT_PROVIDERS, isCloudHarnessConnected } from "../../lib/cloud-agents";
 import { useCloudOrg } from "../../hooks/useCloudOrg";
 import { useProviderConnections } from "../../hooks/useProviderConnections";
+import { accountProvider, providerAccountsKey, useProviderAccounts } from "../../hooks/useProviderAccounts";
 import { CloudHarnessLoginPanel, type CloudHarness } from "./CloudHarnessLoginPanel";
 import { apiClient, apiErrorCode, apiErrorMessage } from "../../lib/api-client";
 import { aoBridge } from "../../lib/bridge";
 import { cn } from "../../lib/utils";
 import { useShellMaybe } from "../../lib/shell-context";
-import { useResolvedTheme } from "../../stores/ui-store";
+import { useResolvedTheme, useUiStore } from "../../stores/ui-store";
 import { AgentAvatar } from "../AgentAvatar";
 import { TerminalPane } from "../TerminalPane";
 import { Button } from "../ui/button";
@@ -152,6 +153,8 @@ export function HarnessSettingsSection({
 	const cloudView = cloudEnabled && view === "cloud";
 	const signedIntoCloud = Boolean(cloudOrg?.id);
 	const cloudConnections = useProviderConnections();
+	const providerAccounts = useProviderAccounts(!cloudView);
+	const openGlobalSettings = useUiStore((state) => state.openGlobalSettings);
 	const [search, setSearch] = useState("");
 	const [authStates, setAuthStates] = useState<AgentAuthStates>({});
 	const [actionErrors, setActionErrors] = useState<Partial<Record<AgentId, string>>>({});
@@ -175,6 +178,13 @@ export function HarnessSettingsSection({
 	const jobMap = useMemo(() => new Map(jobs.data?.map((job) => [job.target, job]) ?? []), [jobs.data]);
 	const agentAuthPlans = useMemo(() => new Map(authPlans.data?.map((plan) => [plan.agentId, plan]) ?? []), [authPlans.data]);
 	const readinessAgents = useMemo(() => new Map(agents.data?.agents.map((agent) => [agent.id, agent]) ?? []), [agents.data]);
+	const managedAccountProviders = useMemo(() => {
+		const result = new Map<string, boolean>();
+		for (const account of providerAccounts.data?.accounts ?? []) {
+			if (account.signedIn) result.set(account.provider, true);
+		}
+		return result;
+	}, [providerAccounts.data?.accounts]);
 	const installed = useMemo(
 		() => new Set<AgentId>(agents.data?.agents.filter((agent) => agent.installation.state === "installed").map((agent) => agent.id as AgentId) ?? []),
 		[agents.data],
@@ -227,6 +237,7 @@ export function HarnessSettingsSection({
 		let active = true;
 		const invalidateHarnessQueries = () => Promise.all([
 			queryClient.invalidateQueries({ queryKey: agentReadinessQueryKey }),
+			queryClient.invalidateQueries({ queryKey: providerAccountsKey }),
 			queryClient.invalidateQueries({ queryKey: installerQueryKey }),
 			queryClient.invalidateQueries({ queryKey: installJobsQueryKey }),
 			queryClient.invalidateQueries({ queryKey: agentAuthPlansQueryKey }),
@@ -256,7 +267,7 @@ export function HarnessSettingsSection({
 	}, [queryClient]);
 	useEffect(() => {
 		if (focusHandledRef.current || !targetAgentId) return;
-		if (agents.isPending || installers.isPending || jobs.isPending || authPlans.isPending) return;
+		if (agents.isPending || installers.isPending || jobs.isPending || authPlans.isPending || (!cloudView && accountProvider(targetAgentId) && providerAccounts.isPending)) return;
 		const row = Array.from(rowsRef.current?.querySelectorAll<HTMLElement>("[data-agent]") ?? [])
 			.find((candidate) => candidate.dataset.agent === targetAgentId);
 		if (!row) return;
@@ -267,7 +278,7 @@ export function HarnessSettingsSection({
 		(primaryAction ?? row).focus({ preventScroll: true });
 		setHighlightedAgentId(targetAgentId);
 		highlightTimerRef.current = window.setTimeout(() => setHighlightedAgentId(null), FOCUS_HIGHLIGHT_MS);
-	}, [agents.isPending, authPlans.isPending, installers.isPending, jobs.isPending, targetAgentId]);
+	}, [agents.isPending, authPlans.isPending, installers.isPending, jobs.isPending, targetAgentId, cloudView, providerAccounts.isPending]);
 
 	useEffect(() => () => {
 		if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
@@ -520,7 +531,7 @@ export function HarnessSettingsSection({
 				) : null}
 			</div>
 
-			{installers.error || authPlans.error || agents.error || jobs.error ? (
+			{installers.error || authPlans.error || agents.error || jobs.error || providerAccounts.error ? (
 				<div className="flex items-center gap-2 rounded-md border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
 					<TriangleAlert className="size-4" aria-hidden="true" />
 					{jobs.error instanceof Error ? jobs.error.message : t("settings.harness.loadFailed")}
@@ -557,6 +568,11 @@ export function HarnessSettingsSection({
 						const isSetupAction = authPlan?.action === "setup";
 						const authState = authStates[agentId];
 						const authStatus = readinessAgent?.authentication.state;
+						const managedProviderID = accountProvider(agentId);
+						const managedProvider = managedProviderID !== "";
+						const managedSignedIn = managedProvider && managedAccountProviders.get(managedProviderID) === true;
+						const managedAccountLoading = managedProvider && providerAccounts.isPending;
+						const managedAccountError = managedProvider && providerAccounts.isError;
 						const mimoConfigured = agentId === "mimo-code" && authStatus === "configured";
 						const installationStatusLabel = t("settings.harness.installed");
 						const showInstallationStatus = authStatus === "authorized"
@@ -604,7 +620,7 @@ export function HarnessSettingsSection({
 								</div>
 							);
 						}
-						const rowHasError = failed || Boolean(authState?.error);
+						const rowHasError = failed || Boolean(authState?.error) || Boolean(managedAccountError);
 						const rowAuthWorkflow = authWorkflow?.agentId === agentId ? authWorkflow : null;
 						const hasDiagnostics = Boolean(
 							job &&
@@ -612,7 +628,15 @@ export function HarnessSettingsSection({
 							(job.error || job.output || job.method || job.expectedDestination),
 						);
 
-						const authSummary = authState?.error
+						const authSummary = managedProvider
+							? managedAccountLoading
+								? t("providerAccounts.loading")
+								: managedAccountError
+									? t("providerAccounts.loginStatusFailed")
+									: managedSignedIn
+										? t("settings.harness.loggedIn")
+										: t("providerAccounts.managedNeedsLogin")
+							: authState?.error
 							? authState.error
 							: authStatus === "configured"
 								? t("settings.harness.configured")
@@ -647,6 +671,18 @@ export function HarnessSettingsSection({
 								) : null}
 							</>
 						) : null;
+						const managedControls = managedProvider ? (
+							<Button
+								data-harness-primary-action=""
+								type="button"
+								size="sm"
+								variant={managedSignedIn ? "outline" : "default"}
+								disabled={managedAccountLoading}
+								onClick={() => openGlobalSettings("accountManager")}
+							>
+								{managedSignedIn ? t("providerAccounts.title") : t("providerAccounts.openSignIn")}
+							</Button>
+						) : null;
 						// A logged-in harness's only action is to re-run its login.
 						const refreshLocal = authPlan?.action === "login" && authStatus === "authorized" ? (
 							<Button type="button" size="sm" variant="outline" disabled={!authPlan.available || authState?.pending || Boolean(authWorkflow)} onClick={() => void startAuth(agentId)}>
@@ -657,9 +693,10 @@ export function HarnessSettingsSection({
 				<span className="inline-flex items-center gap-1.5 text-xs text-settings-muted" role="status"><LoaderCircle className="size-4 animate-spin" aria-hidden="true" />{job?.status === "installing" ? t("settings.harness.installing") : t("settings.harness.verifying")}</span>
 							) : isInstalled ? (
 								<div className="flex shrink-0 items-center gap-2">
+								{managedProvider ? managedControls : null}
 								{/* The subtitle already states a login ("Connected", "Configured"); the
 								    chip is only for installed harnesses whose subtitle doesn't say so. */}
-								{showInstallationStatus && authStatus !== "authorized" && !mimoConfigured ? (
+								{!managedProvider && showInstallationStatus && authStatus !== "authorized" && !mimoConfigured ? (
 									<Button
 										type="button"
 										size="none"
@@ -671,8 +708,8 @@ export function HarnessSettingsSection({
 										{installationStatusLabel}
 									</Button>
 								) : null}
-								{authControls}
-								{refreshLocal}
+								{!managedProvider ? authControls : null}
+								{!managedProvider ? refreshLocal : null}
 								</div>
 							) : failed ? (
 								<div className="flex items-center gap-1.5">

@@ -498,7 +498,7 @@ export function TaskComposer({
 	const accountDefault = providerAccounts.data?.defaults.find(p => p.provider === accountProviderId);
 	const chosenAccountId = chosenAccount.provider === accountProviderId ? chosenAccount.id : "";
 	const accountChoices = providerAccounts.data?.accounts.filter(a => a.provider === accountProviderId && a.signedIn) ?? [];
-	const managedAccountReady = !accountDefault?.managed || accountChoices.some(a => a.id === (chosenAccountId || accountDefault.primaryId));
+	const managedAccountReady = !accountProviderId || (!providerAccounts.isError && accountChoices.some(a => a.id === (chosenAccountId || accountDefault?.primaryId)));
 	const canSubmit =
 		Boolean(projectId) &&
 		(isCloudProject || managedAccountReady) &&
@@ -612,9 +612,9 @@ export function TaskComposer({
 
 	return (
 		<>
-		{!isCloudProject && accountProviderId && accountDefault?.managed ? <label className="flex items-center gap-2 px-3 py-2 text-xs">{t("providerAccounts.accountLabel")}
+		{!isCloudProject && accountProviderId && providerAccounts.data ? <label className="flex items-center gap-2 px-3 py-2 text-xs">{t("providerAccounts.accountLabel")}
 			<select aria-label={t("providerAccounts.newSessionLabel")} value={chosenAccountId} onChange={event => setChosenAccount({ provider: accountProviderId, id: event.target.value })}>
-				<option value="">{accountDefault.primaryId ? t("providerAccounts.primaryOption", { email: accountChoices.find(a => a.id === accountDefault.primaryId)?.email ?? t("providerAccounts.accountFallback") }) : t("providerAccounts.newSessionLogin")}</option>
+				<option value="">{accountDefault?.primaryId ? t("providerAccounts.primaryOption", { email: accountChoices.find(a => a.id === accountDefault?.primaryId)?.email ?? t("providerAccounts.accountFallback") }) : t("providerAccounts.newSessionLogin")}</option>
 				{accountChoices.map(a => <option key={a.id} value={a.id}>{a.email}</option>)}
 			</select>
 		</label> : null}

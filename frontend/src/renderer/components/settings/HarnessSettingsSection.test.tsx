@@ -9,7 +9,14 @@ import { agentReadinessQueryKey, useAgentReadinessQuery, type AgentReadiness } f
 import type { TerminalSessionState } from "../../hooks/useTerminalSession";
 import { agentReadiness } from "../../test/agent-readiness-fixtures";
 import { TooltipProvider } from "../ui/tooltip";
+import { useUiStore } from "../../stores/ui-store";
 import { HarnessSettingsSection } from "./HarnessSettingsSection";
+
+const managedAccounts = vi.hoisted(() => ({ accounts: [] as Array<{ id: string; provider: string; signedIn: boolean }>, isPending: false, isError: false }));
+vi.mock("../../hooks/useProviderAccounts", async (original) => ({
+	...await original<typeof import("../../hooks/useProviderAccounts")>(),
+	useProviderAccounts: () => ({ data: { accounts: managedAccounts.accounts }, isPending: managedAccounts.isPending, isError: managedAccounts.isError }),
+}));
 
 // Cloud sign-in state for the cloud login rows. Signed out by default, which
 // leaves every row on its local-only controls.
@@ -126,6 +133,9 @@ function renderSection(focusAgentId?: string, selectorAgentId?: string, initialV
 describe("HarnessSettingsSection", () => {
 	beforeEach(async () => {
 		await appI18n.changeLanguage("en");
+		managedAccounts.accounts = [];
+		managedAccounts.isPending = false;
+		managedAccounts.isError = false;
 		terminalFocusRequested.value = false;
 		terminalStateCallback.value = undefined;
 		cloudMocks.cloudEnabled = false;
@@ -243,10 +253,10 @@ describe("HarnessSettingsSection", () => {
 	});
 
 	it("offers to refresh an existing local login", async () => {
-		const authorized = { agents: [agentReadiness("claude-code", "Claude Code", { authentication: "authorized" })] };
+		const authorized = { agents: [agentReadiness("cursor", "Cursor", { authentication: "authorized" })] };
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/readiness") return { data: authorized } as never;
-			if (path === "/api/v1/agents/auth-plans") return { data: { plans: [{ agentId: "claude-code", action: "login", launchMode: "terminal", available: true }] } } as never;
+			if (path === "/api/v1/agents/auth-plans") return { data: { plans: [{ agentId: "cursor", action: "login", launchMode: "terminal", available: true }] } } as never;
 			if (path === "/api/v1/agents/installers") return { data: { agents: [] } } as never;
 			if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
 			return { data: undefined } as never;
@@ -254,7 +264,7 @@ describe("HarnessSettingsSection", () => {
 		vi.mocked(apiClient.POST).mockResolvedValue({ data: authorized } as never);
 		renderSection();
 
-		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
+		const row = (await screen.findByText("Cursor")).closest('[data-agent="cursor"]') as HTMLElement;
 		expect(await within(row).findByRole("button", { name: "Refresh login" })).toBeEnabled();
 		expect(within(row).queryByRole("button", { name: "Login" })).toBeNull();
 		expect(within(row).queryByRole("button", { name: "Authorized" })).toBeNull();
@@ -342,7 +352,7 @@ describe("HarnessSettingsSection", () => {
 		expect(scrollIntoView).toHaveBeenCalledTimes(1);
 	});
 
-	it("focuses Login for an installed harness when authentication is required", async () => {
+	it("focuses Account Manager sign-in for an installed managed harness", async () => {
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
 			if (path === "/api/v1/agents/installers") return { data: plans } as never;
@@ -355,15 +365,22 @@ describe("HarnessSettingsSection", () => {
 		Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
 		renderSection("claude-code");
 		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
-		const login = await within(row).findByRole("button", { name: "Login" });
+		const login = await within(row).findByRole("button", { name: "Open sign-in" });
 
 		await waitFor(() => expect(document.activeElement).toBe(login));
 	});
 
 	it("falls back to the targeted row when it has no primary action", async () => {
 		Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
-		renderSection("claude-code");
-		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
+		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
+			if (path === "/api/v1/agents/readiness") return { data: catalogWithInstalled("goose") } as never;
+			if (path === "/api/v1/agents/installers") return { data: plans } as never;
+			if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
+			return { data: undefined } as never;
+		});
+		vi.mocked(apiClient.POST).mockResolvedValue({data: catalogWithInstalled("goose")} as never);
+		renderSection("goose");
+		const row = (await screen.findByText("Goose")).closest('[data-agent="goose"]') as HTMLElement;
 
 		await waitFor(() => expect(document.activeElement).toBe(row));
 		expect(row).toHaveAttribute("tabindex", "-1");
@@ -383,24 +400,24 @@ describe("HarnessSettingsSection", () => {
 
 	it("shows installed harnesses and install actions without authentication UI", async () => {
 		renderSection();
-		await waitFor(() => expect(screen.getAllByText("Installed").length).toBeGreaterThan(0), { timeout: 10_000 });
+		await screen.findByRole("button", { name: "Open sign-in" });
 		expect(screen.getByText("Codex")).toBeInTheDocument();
-		expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Login" })).not.toBeInTheDocument();
 	});
 
 	it("shows the authentication action for an installed agent and opens documentation", async () => {
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
-			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
+			if (path === "/api/v1/agents/readiness") return { data: catalogWithInstalled("cursor") } as never;
 			if (path === "/api/v1/agents/installers") return { data: plans } as never;
 			if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
 			if (path === "/api/v1/agents/auth-plans") {
-				return { data: { plans: [{ agentId: "claude-code", action: "login", launchMode: "documentation", available: true, documentationUrl: "https://example.test/login" }] } } as never;
+				return { data: { plans: [{ agentId: "cursor", action: "login", launchMode: "documentation", available: true, documentationUrl: "https://example.test/login" }] } } as never;
 			}
 			return { data: undefined } as never;
 		});
 		const openExternal = vi.spyOn(aoBridge.app, "openExternal").mockResolvedValue(undefined);
 		renderSection();
-		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
+		const row = (await screen.findByText("Cursor")).closest('[data-agent="cursor"]') as HTMLElement;
 		const login = await within(row).findByRole("button", { name: "Login" });
 		await userEvent.click(login);
 		expect(openExternal).toHaveBeenCalledWith("https://example.test/login");
@@ -435,36 +452,36 @@ describe("HarnessSettingsSection", () => {
 			resolveRefresh({ data: refreshed });
 		});
 		await waitFor(() => {
-			expect(within(row).getByRole("button", { name: "Installed" })).toBeDisabled();
+			expect(within(row).getByRole("button", { name: "Open sign-in" })).toBeEnabled();
 		});
 	});
 
 	it("runs a fresh authentication check after terminal completion", async () => {
-		const authorized = catalogWithInstalled("claude-code");
-		authorized.agents[0].authentication.state = "authorized";
+		const authorized = catalogWithInstalled("cursor");
+		authorized.agents[2].authentication.state = "authorized";
 		let probeCalls = 0;
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
-			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
+			if (path === "/api/v1/agents/readiness") return { data: catalogWithInstalled("cursor") } as never;
 			if (path === "/api/v1/agents/installers") return { data: plans } as never;
 			if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
 			if (path === "/api/v1/agents/auth-plans") return { data: { plans: [
-				{ agentId: "claude-code", action: "login", launchMode: "terminal", available: true },
+				{ agentId: "cursor", action: "login", launchMode: "terminal", available: true },
 			] } } as never;
 			return { data: undefined } as never;
 		});
 		vi.mocked(apiClient.POST).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/{agent}/probe") {
 				probeCalls += 1;
-				return { data: { agent: { id: "claude-code", label: "Claude Code", authStatus: "authorized" }, supported: true, installed: true } } as never;
+				return { data: { agent: { id: "cursor", label: "Cursor", authStatus: "authorized" }, supported: true, installed: true } } as never;
 			}
 			if (path === "/api/v1/agents/readiness/ensure") return { data: authorized } as never;
 			if (path === "/api/v1/agents/{agent}/auth") return { data: {
-				agentId: "claude-code",
+				agentId: "cursor",
 				action: "login",
 				guidance: "Complete login in the terminal.",
 				terminal: {
 					handleId: "auth-terminal-1",
-					title: "Claude Code login",
+					title: "Cursor login",
 					workingDir: "/tmp",
 					createdAt: "2026-09-15T00:00:00Z",
 				},
@@ -475,7 +492,7 @@ describe("HarnessSettingsSection", () => {
 		const user = userEvent.setup();
 
 		renderSection();
-		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
+		const row = (await screen.findByText("Cursor")).closest('[data-agent="cursor"]') as HTMLElement;
 		const login = await within(row).findByRole("button", { name: "Login" });
 		await user.click(login);
 		await within(row).findByTestId("inline-terminal-body");
@@ -497,15 +514,15 @@ describe("HarnessSettingsSection", () => {
 	// The first check right after a login terminal exits can fail transiently;
 	// the panel must not report a completed login as signed out.
 	async function loginWithProbeResults(statuses: string[], readinessAfterProbes: number, terminalInput?: string) {
-		const authorized = catalogWithInstalled("claude-code");
-		authorized.agents[0].authentication.state = "authorized";
+		const authorized = catalogWithInstalled("cursor");
+		authorized.agents[2].authentication.state = "authorized";
 		let probeCalls = 0;
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
-			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
+			if (path === "/api/v1/agents/readiness") return { data: catalogWithInstalled("cursor") } as never;
 			if (path === "/api/v1/agents/installers") return { data: plans } as never;
 			if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
 			if (path === "/api/v1/agents/auth-plans") return { data: { plans: [
-				{ agentId: "claude-code", action: "login", launchMode: "terminal", available: true },
+				{ agentId: "cursor", action: "login", launchMode: "terminal", available: true },
 			] } } as never;
 			return { data: undefined } as never;
 		});
@@ -513,19 +530,19 @@ describe("HarnessSettingsSection", () => {
 			if (path === "/api/v1/agents/{agent}/probe") {
 				const authStatus = statuses[Math.min(probeCalls, statuses.length - 1)];
 				probeCalls += 1;
-				return { data: { agent: { id: "claude-code", label: "Claude Code", authStatus }, supported: true, installed: true } } as never;
+				return { data: { agent: { id: "cursor", label: "Cursor", authStatus }, supported: true, installed: true } } as never;
 			}
-			if (path === "/api/v1/agents/readiness/ensure") return { data: probeCalls >= readinessAfterProbes ? authorized : catalog } as never;
+			if (path === "/api/v1/agents/readiness/ensure") return { data: probeCalls >= readinessAfterProbes ? authorized : catalogWithInstalled("cursor") } as never;
 			if (path === "/api/v1/agents/{agent}/auth") return { data: {
-				agentId: "claude-code", action: "login", guidance: "Complete login in the terminal.", terminalInput,
-				terminal: { handleId: "auth-terminal-1", title: "Claude Code login", workingDir: "/tmp", createdAt: "2026-09-15T00:00:00Z" },
+				agentId: "cursor", action: "login", guidance: "Complete login in the terminal.", terminalInput,
+				terminal: { handleId: "auth-terminal-1", title: "Cursor login", workingDir: "/tmp", createdAt: "2026-09-15T00:00:00Z" },
 			} } as never;
 			return { data: undefined } as never;
 		});
 		const close = vi.spyOn(apiClient, "DELETE").mockResolvedValue({ data: undefined } as never);
 		const user = userEvent.setup();
 		renderSection();
-		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
+		const row = (await screen.findByText("Cursor")).closest('[data-agent="cursor"]') as HTMLElement;
 		await user.click(await within(row).findByRole("button", { name: "Login" }));
 		await within(row).findByTestId("inline-terminal-body");
 		return { row, close, probeCalls: () => probeCalls, exit: () => act(() => terminalStateCallback.value?.("exited")) };
@@ -599,29 +616,29 @@ describe("HarnessSettingsSection", () => {
 	});
 
 	it("refreshes authentication when the user closes the login terminal", async () => {
-		const authorized = catalogWithInstalled("claude-code");
-		authorized.agents[0].authentication.state = "authorized";
+		const authorized = catalogWithInstalled("cursor");
+		authorized.agents[2].authentication.state = "authorized";
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
-			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
+			if (path === "/api/v1/agents/readiness") return { data: catalogWithInstalled("cursor") } as never;
 			if (path === "/api/v1/agents/installers") return { data: plans } as never;
 			if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
 			if (path === "/api/v1/agents/auth-plans") return { data: { plans: [
-				{ agentId: "claude-code", action: "login", launchMode: "terminal", available: true },
+				{ agentId: "cursor", action: "login", launchMode: "terminal", available: true },
 			] } } as never;
 			return { data: undefined } as never;
 		});
 		vi.mocked(apiClient.POST).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/{agent}/probe") {
-				return { data: { agent: { id: "claude-code", label: "Claude Code", authStatus: "authorized" }, supported: true, installed: true } } as never;
+				return { data: { agent: { id: "cursor", label: "Cursor", authStatus: "authorized" }, supported: true, installed: true } } as never;
 			}
 			if (path === "/api/v1/agents/readiness/ensure") return { data: authorized } as never;
 			if (path === "/api/v1/agents/{agent}/auth") return { data: {
-				agentId: "claude-code",
+				agentId: "cursor",
 				action: "login",
 				guidance: "Complete login in the terminal.",
 				terminal: {
 					handleId: "auth-terminal-close",
-					title: "Claude Code login",
+					title: "Cursor login",
 					workingDir: "/tmp",
 					createdAt: "2026-09-15T00:00:00Z",
 				},
@@ -632,7 +649,7 @@ describe("HarnessSettingsSection", () => {
 		const user = userEvent.setup();
 
 		renderSection();
-		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
+		const row = (await screen.findByText("Cursor")).closest('[data-agent="cursor"]') as HTMLElement;
 		await user.click(await within(row).findByRole("button", { name: "Login" }));
 		await user.click(await within(row).findByRole("button", { name: "Close settings" }));
 
@@ -640,32 +657,32 @@ describe("HarnessSettingsSection", () => {
 			params: { path: { handleId: "auth-terminal-close" } },
 		}));
 		await waitFor(() => expect(apiClient.POST).toHaveBeenCalledWith("/api/v1/agents/{agent}/probe", {
-			params: { path: { agent: "claude-code" } },
+			params: { path: { agent: "cursor" } },
 		}));
 		await within(row).findByText("Connected");
 		expect(within(row).queryByRole("button", { name: "Authorized" })).toBeNull();
 	});
 
 	it("uses Configured for a completed setup action", async () => {
-		const authorized = catalogWithInstalled("codex");
-		authorized.agents[1].authentication.state = "authorized";
+		const authorized = catalogWithInstalled("cursor");
+		authorized.agents[2].authentication.state = "authorized";
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/readiness") return { data: authorized } as never;
 			if (path === "/api/v1/agents/installers") return { data: plans } as never;
 			if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
 			if (path === "/api/v1/agents/auth-plans") return { data: { plans: [
-				{ agentId: "codex", action: "setup", launchMode: "terminal", available: true },
+				{ agentId: "cursor", action: "setup", launchMode: "terminal", available: true },
 			] } } as never;
 			return { data: undefined } as never;
 		});
 		vi.mocked(apiClient.POST).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/readiness/ensure") return { data: authorized } as never;
-			if (path === "/api/v1/agents/{agent}/probe") return { data: { agent: { id: "codex", label: "Codex", authStatus: "authorized" }, supported: true, installed: true } } as never;
+			if (path === "/api/v1/agents/{agent}/probe") return { data: { agent: { id: "cursor", label: "Cursor", authStatus: "authorized" }, supported: true, installed: true } } as never;
 			return { data: undefined } as never;
 		});
 
 		renderSection();
-		const row = (await screen.findByText("Codex")).closest('[data-agent="codex"]') as HTMLElement;
+		const row = (await screen.findByText("Cursor")).closest('[data-agent="cursor"]') as HTMLElement;
 
 		await within(row).findByText("Configured");
 	});
@@ -682,7 +699,7 @@ describe("HarnessSettingsSection", () => {
 		});
 		renderSection();
 		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
-		expect(await within(row).findByRole("button", { name: "Login" })).toBeInTheDocument();
+		expect(await within(row).findByRole("button", { name: "Open sign-in" })).toBeInTheDocument();
 		expect(within(row).queryByRole("button", { name: "Installed" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Refresh harness status" })).not.toBeInTheDocument();
 		expect(within(row).queryByRole("button", { name: "Check login" })).not.toBeInTheDocument();
@@ -893,7 +910,7 @@ describe("HarnessSettingsSection", () => {
 		const claudeRow = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
 		const cursorRow = (await screen.findByText("Cursor")).closest('[data-agent="cursor"]') as HTMLElement;
 
-		expect(claudeRow).toHaveTextContent("Installed");
+		expect(claudeRow).toHaveTextContent("Open sign-in");
 		expect(within(claudeRow).queryByRole("button", { name: "Reinstall" })).not.toBeInTheDocument();
 		expect(within(cursorRow).queryByRole("button", { name: "Reinstall" })).not.toBeInTheDocument();
 		expect(within(cursorRow).queryByRole("button", { name: "Instructions" })).not.toBeInTheDocument();
@@ -976,7 +993,7 @@ describe("HarnessSettingsSection", () => {
 		renderSection();
 		const row = (await screen.findByText("Codex")).closest('[data-agent="codex"]') as HTMLElement;
 		await waitFor(() => expect(apiClient.POST).toHaveBeenCalledWith("/api/v1/agents/{agent}/probe", { params: { path: { agent: "codex" } } }), { timeout: 3_000 });
-		await waitFor(() => expect(row).toHaveTextContent("Installed"));
+		await waitFor(() => expect(row).toHaveTextContent("Open sign-in"));
 		await waitFor(() => expect(installerFetches).toBe(2));
 	});
 
@@ -1008,7 +1025,7 @@ describe("HarnessSettingsSection", () => {
 		const row = (await screen.findByText("Codex")).closest('[data-agent="codex"]') as HTMLElement;
 		await userEvent.click(await within(row).findByRole("button", { name: "Install" }));
 
-		await waitFor(() => expect(row).toHaveTextContent(authentication === "authorized" ? "Connected" : "Installed"));
+		await waitFor(() => expect(row).toHaveTextContent("Open sign-in"));
 		await waitFor(() => expect(selector).toHaveTextContent(authentication === "authorized" ? /^ready$/ : /^not_ready$/));
 		expect(client.getQueryData<AgentReadiness>(agentReadinessQueryKey)?.agents).toEqual([initial.agents[0], updated]);
 		expect(screen.getByTestId("originating-selector")).toBe(selector);
@@ -1017,13 +1034,13 @@ describe("HarnessSettingsSection", () => {
 	it("updates a mounted readiness consumer when the Harness authentication terminal completes", async () => {
 		const initial = { agents: [
 			agentReadiness("claude-code", "Claude Code"),
-			agentReadiness("codex", "Codex", { authentication: "unauthorized" }),
+			agentReadiness("cursor", "Cursor", { authentication: "unauthorized" }),
 		] };
-		const authorized = agentReadiness("codex", "Codex");
+		const authorized = agentReadiness("cursor", "Cursor");
 		let probed = false;
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/readiness") return { data: initial } as never;
-			if (path === "/api/v1/agents/auth-plans") return { data: { plans: [{ agentId: "codex", action: "login", launchMode: "terminal", available: true }] } } as never;
+			if (path === "/api/v1/agents/auth-plans") return { data: { plans: [{ agentId: "cursor", action: "login", launchMode: "terminal", available: true }] } } as never;
 			if (path === "/api/v1/agents/installers") return { data: plans } as never;
 			if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
 			return { data: undefined } as never;
@@ -1031,20 +1048,20 @@ describe("HarnessSettingsSection", () => {
 		vi.mocked(apiClient.POST).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/readiness/ensure") return { data: probed ? { agents: [authorized] } : initial } as never;
 			if (path === "/api/v1/agents/{agent}/auth") return { data: {
-				agentId: "codex", action: "login", terminal: { handleId: "auth-codex", projectId: null, sessionId: null, workingDir: "/tmp", title: "Codex login", createdAt: "2026-09-19T00:00:00Z" },
+				agentId: "cursor", action: "login", terminal: { handleId: "auth-codex", projectId: null, sessionId: null, workingDir: "/tmp", title: "Cursor login", createdAt: "2026-09-19T00:00:00Z" },
 			} } as never;
 			if (path === "/api/v1/agents/{agent}/probe") {
 				probed = true;
-				return { data: { agent: { id: "codex", authStatus: "authorized" }, installed: true } } as never;
+				return { data: { agent: { id: "cursor", authStatus: "authorized" }, installed: true } } as never;
 			}
 			return { data: undefined } as never;
 		});
 		vi.spyOn(apiClient, "DELETE").mockResolvedValue({ data: undefined } as never);
 		Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
-		const { client } = renderSection(undefined, "codex");
+		const { client } = renderSection(undefined, "cursor");
 		const selector = screen.getByTestId("originating-selector");
 		await waitFor(() => expect(selector).toHaveTextContent("not_ready"));
-		const row = (await screen.findByText("Codex")).closest('[data-agent="codex"]') as HTMLElement;
+		const row = (await screen.findByText("Cursor")).closest('[data-agent="cursor"]') as HTMLElement;
 		await userEvent.click(await within(row).findByRole("button", { name: "Login" }));
 		await userEvent.click(await screen.findByRole("button", { name: "Complete login terminal" }));
 

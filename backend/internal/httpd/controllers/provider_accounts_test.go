@@ -149,7 +149,7 @@ func TestProviderAccountsHTTPIncludesSafeUsageSummary(t *testing.T) {
 }
 func TestProviderAccountsHTTPEmptyAndAdoptedProvider(t *testing.T) {
 	for _, adopted := range []bool{false, true} {
-		t.Run(map[bool]string{false: "native", true: "managed-without-account"}[adopted], func(t *testing.T) {
+		t.Run(map[bool]string{false: "no-primary", true: "managed-without-account"}[adopted], func(t *testing.T) {
 			f := &accountHTTPFake{}
 			if adopted {
 				f.state.Primaries = []domain.ProviderPrimary{{Provider: "codex"}}
@@ -162,7 +162,7 @@ func TestProviderAccountsHTTPEmptyAndAdoptedProvider(t *testing.T) {
 			if out.Code != 200 || data.Accounts == nil || len(data.Accounts) != 0 || len(data.Defaults) != 2 {
 				t.Fatalf("status=%d inventory=%+v", out.Code, data)
 			}
-			if data.Defaults[0].Managed != adopted || data.Defaults[0].PrimaryID != "" || data.Defaults[1].Managed {
+			if !data.Defaults[0].Managed || data.Defaults[0].PrimaryID != "" || !data.Defaults[1].Managed {
 				t.Fatalf("defaults=%+v", data.Defaults)
 			}
 		})

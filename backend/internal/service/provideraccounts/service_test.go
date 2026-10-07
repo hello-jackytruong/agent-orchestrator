@@ -208,7 +208,7 @@ func (h accountHarness) route(t *testing.T, session, want string) {
 func TestProviderAccountFirstLoginAndSeparatePrimaries(t *testing.T) {
 	h := setupAccounts(t)
 	for _, harness := range []domain.AgentHarness{domain.HarnessCodex, domain.HarnessClaudeCode} {
-		if id, managed, err := h.svc.ResolveAccount(h.ctx, harness, ""); err != nil || managed || id != "" {
+		if id, managed, err := h.svc.ResolveAccount(h.ctx, harness, ""); !managed || !errors.Is(err, ports.ErrProviderLoginRequired) || id != "" {
 			t.Fatalf("before setup id=%s managed=%t err=%v", id, managed, err)
 		}
 	}
