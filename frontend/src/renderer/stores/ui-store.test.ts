@@ -34,8 +34,8 @@ describe("global settings deep links", () => {
 			focusAgentId: "codex",
 		});
 
-		useUiStore.getState().openGlobalSettings("agents");
-		expect(useUiStore.getState().settingsModal).toEqual({ scope: "global", section: "agents" });
+		useUiStore.getState().openGlobalSettings("accountManager");
+		expect(useUiStore.getState().settingsModal).toEqual({ scope: "global", section: "accountManager" });
 	});
 
 	it("preserves project settings only for explicit recovery navigation", () => {

@@ -7,7 +7,6 @@ import { BrowserProfilesSection } from "./BrowserProfilesSection";
 import { CloudCredentialsSection } from "./CloudCredentialsSection";
 import { CloudProviderSection } from "./CloudProviderSection";
 import { ProviderAccountsSection } from "./ProviderAccountsSection";
-import { CodexAccountsSection } from "./CodexAccountsSection";
 import { ConnectMobileContent } from "./ConnectMobileContent";
 import { GeneralSettingsSection } from "./GeneralSettingsSection";
 import { HarnessSettingsSection } from "./HarnessSettingsSection";
@@ -51,12 +50,6 @@ const globalSettingsCatalog: SettingsCatalogItem[] = [
 		icon: Bot,
 		label: (t) => t("settings.harness"),
 		render: (_t, titleHidden, { focusAgentId, harnessView }) => <HarnessSettingsSection focusAgentId={focusAgentId} initialView={harnessView} titleHidden={titleHidden} />,
-	},
-	{
-		id: "agents",
-		icon: BadgeCheck,
-		label: (t) => t("settings.agents"),
-		render: (_t, titleHidden) => <CodexAccountsSection titleHidden={titleHidden} />,
 	},
 	{
 		id: "accountManager",

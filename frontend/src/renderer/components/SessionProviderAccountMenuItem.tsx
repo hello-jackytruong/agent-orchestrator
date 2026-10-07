@@ -68,7 +68,7 @@ export function SessionProviderAccountMenuItem({ sessionId }: { sessionId: strin
 		<DropdownMenuSub>
 			<DropdownMenuSubTrigger disabled={pending}>
 				<UserRound aria-hidden="true" className="size-3.5" />
-				<span>{t("settings.codexAccounts.switchConfirm")}</span>
+				<span>{t("providerAccounts.switchAccount")}</span>
 				{current ? <span className="ml-auto max-w-28 truncate text-2xs text-passive">{current.email}</span> : null}
 			</DropdownMenuSubTrigger>
 			<DropdownMenuSubContent className="min-w-56 text-xs">

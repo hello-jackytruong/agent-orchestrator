@@ -1,11 +1,8 @@
 import { Bot, Disc3, Loader2, MonitorCog, TriangleAlert, X, type LucideIcon } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useCloudGate } from "../hooks/useCloudGate";
-import { ensureCodexAccounts } from "../hooks/useCodexAccountsQuery";
-import { writeCodexAccounts } from "../hooks/codex-accounts-state";
 import { GlobalSettingsForm } from "./GlobalSettingsForm";
 import { ProjectSettingsForm, type ProjectSettingsSaveState, type ProjectSettingsSection as ProjectFormSection } from "./ProjectSettingsForm";
 import { CuesSettings } from "./CuesDialog";
@@ -31,7 +28,6 @@ export function SettingsDialog() {
 
 function SettingsDialogLayer({ settingsModal }: { settingsModal: SettingsModal }) {
 	const { t } = useTranslation();
-	const queryClient = useQueryClient();
 	const closeSettings = useUiStore((state) => state.closeSettings);
 	// Reads the daemon settings the dialog tree already queries; no extra fetch.
 	const { cloudEnabled } = useCloudGate();
@@ -75,7 +71,6 @@ function SettingsDialogLayer({ settingsModal }: { settingsModal: SettingsModal }
 	const [projectSaveState, setProjectSaveState] = useState<ProjectSettingsSaveState>(initialProjectSaveState);
 	const [cueBusy, setCueBusy] = useState(false);
 	const closeWhenSavedRef = useRef(false);
-	const globalSettingsWasOpen = useRef(false);
 
 	const activeLabel = isProjectSettings
 		? (projectSections.find((s) => s.id === activeProjectSection)?.label ?? t("settings.project.general"))
@@ -148,26 +143,6 @@ function SettingsDialogLayer({ settingsModal }: { settingsModal: SettingsModal }
 		setFocusAgentId(settingsModal?.scope === "global" ? settingsModal.focusAgentId : undefined);
 		setHarnessView(settingsModal?.scope === "global" ? settingsModal.harnessView : undefined);
 	}, [settingsModal]);
-
-	useEffect(() => {
-		const globalSettingsOpen = settingsModal?.scope === "global";
-		if (!globalSettingsOpen) {
-			globalSettingsWasOpen.current = false;
-			return;
-		}
-		if (globalSettingsWasOpen.current) return;
-		globalSettingsWasOpen.current = true;
-		// Warm account management as soon as global Settings opens, regardless of
-		// which page is selected. By the time the user visits Accounts, external
-		// login/logout changes and saved-account observations are already current.
-		void ensureCodexAccounts([], {
-			includeUsage: true,
-			forceAuthentication: true,
-			forceDeviceReconciliation: true,
-		})
-			.then((next) => writeCodexAccounts(queryClient, next, "replace"))
-			.catch(() => undefined);
-	}, [queryClient, settingsModal?.scope]);
 
 	return (
 		<Dialog.Root

@@ -9,7 +9,6 @@ import {
 	cacheAgentReadiness,
 	ensureAgentReadiness,
 } from "./useAgentReadinessQuery";
-import { codexAccountsQueryKey } from "./codex-accounts-state";
 import { systemRequirementsQueryKey } from "./useSystemRequirementsGate";
 import { providerAccountsKey } from "./useProviderAccounts";
 
@@ -73,7 +72,6 @@ export function useDaemonStatus(queryClient: QueryClient = defaultQueryClient) {
 			applyDaemonStatus(nextStatus);
 			if (daemonChanged) {
 				queryClient.removeQueries({ queryKey: agentReadinessQueryKey, exact: true });
-				queryClient.removeQueries({ queryKey: codexAccountsQueryKey, exact: true });
 				queryClient.removeQueries({ queryKey: systemRequirementsQueryKey });
 				void queryClient.invalidateQueries({ queryKey: providerAccountsKey, exact: true });
 			}
