@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, ChevronDown, Copy, FileUp, KeyRound, LogIn, LogOut, MonitorSmartphone, Plus, ShieldCheck, Trash2, UserRound, X } from "lucide-react";
-import { cancelProviderLogin, changeProviderAccount, fetchProviderLogin, providerAccountsKey, setQuotaAutoSwitch, startProviderLogin, useProviderAccounts, type ProviderAccount, type ProviderLogin } from "../../hooks/useProviderAccounts";
+import { cancelProviderLogin, changeProviderAccount, fetchProviderLogin, providerAccountsCatalogueKey, providerAccountsKey, renameProviderAccount, setQuotaAutoSwitch, startProviderLogin, useProviderAccounts, type ProviderAccount, type ProviderAccounts, type ProviderLogin } from "../../hooks/useProviderAccounts";
 import { aoBridge } from "../../lib/bridge";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -48,8 +48,13 @@ type Removal = { account: ProviderAccount; action: "remove" | "sign-out" };
 type PrimaryChange = { account: ProviderAccount };
 export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean }) {
 	const { t } = useTranslation();
-	const query = useProviderAccounts();
+	const query = useProviderAccounts(true, false);
+	const usageQuery = useProviderAccounts(true, true);
 	const cache = useQueryClient();
+	function setAccountData(next: ProviderAccounts) {
+		cache.setQueryData(providerAccountsKey, next);
+		cache.setQueryData(providerAccountsCatalogueKey, next);
+	}
 	const [login, updateLogin] = useState<ProviderLogin | null>(() => cache.getQueryData<ProviderLogin>(loginKey) ?? null);
 	function setLogin(next: ProviderLogin | null) {
 		cache.setQueryData(loginKey, next);
@@ -70,8 +75,13 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 	const [baseUrl, setBaseUrl] = useState("");
 	const [label, setLabel] = useState("");
 	const [copiedLoginValue, setCopiedLoginValue] = useState<"link" | "code" | null>(null);
+	const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+	const [draftName, setDraftName] = useState("");
 	const loginStatusFailures = useRef(0);
-	const accounts = query.data?.accounts ?? [];
+	const accounts = query.data?.accounts.map((account) => ({
+		...account,
+		usage: usageQuery.data?.accounts.find((withUsage) => withUsage.id === account.id)?.usage,
+	})) ?? [];
 	useEffect(() => {
 		if (!login || login.status !== "waiting") return;
 		let mounted = true;
@@ -86,6 +96,7 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 					setMessage(t("providerAccounts.loginComplete"));
 					setChoiceProvider(null);
 					void cache.invalidateQueries({ queryKey: providerAccountsKey });
+					void cache.invalidateQueries({ queryKey: providerAccountsCatalogueKey });
 				} else if (next.status === "failed") {
 					setChoiceProvider(null);
 					setMessage(t("providerAccounts.loginFailed"));
@@ -141,16 +152,34 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 			event.target.value = "";
 		};
 	}
+	function beginRename(account: ProviderAccount) {
+		setEditingAccountId(account.id);
+		setDraftName(account.displayName || `${account.provider === "codex" ? "Codex" : "Claude"} account`);
+	}
+	function finishRename(account: ProviderAccount) {
+		if (editingAccountId !== account.id) return;
+		const nextName = draftName.trim();
+		setEditingAccountId(null);
+		if (!nextName || nextName === account.displayName) {
+			setDraftName("");
+			return;
+		}
+		void run(async () => {
+			setAccountData(await renameProviderAccount(account.id, nextName));
+			setDraftName("");
+			setMessage(t("providerAccounts.nameUpdated"));
+		});
+	}
 	const alternatives = removal ? accounts.filter(a => a.provider === removal.account.provider && a.signedIn && a.id !== removal.account.id) : [];
 	const needsReplacement = Boolean(removal?.account.primary && alternatives.length);
 	function removalCardFor(accountId: string) {
 		if (removal?.account.id !== accountId) return null;
-		return <Card role="group" aria-label={t("providerAccounts.confirmChange")} className="border-warning/40 bg-warning/[0.04] shadow-none"><div className="flex gap-3 p-4"><div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning"><AlertCircle aria-hidden="true" className="size-4" /></div><div className="min-w-0 flex-1"><p className="font-medium">{t(removal.action === "sign-out" ? "providerAccounts.confirmSignOut" : "providerAccounts.confirmRemove", { email: removal.account.email })}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{removal.account.sessions.length ? t("providerAccounts.affectedSessions") : t("providerAccounts.noSessions")} {!accounts.some(a => a.provider === removal.account.provider && a.signedIn && a.id !== removal.account.id) ? ` ${t("providerAccounts.noAccountsConsequence")}` : ""}</p>{needsReplacement ? <label className="mt-3 flex flex-wrap items-center gap-2 text-xs font-medium">{t("providerAccounts.newPrimary")}<select className="h-8 rounded-md border border-border bg-background px-2 text-xs font-normal" aria-label={t("providerAccounts.replacementPrimary")} value={replacement} onChange={event => setReplacement(event.target.value)}><option value="">{t("providerAccounts.chooseAccount")}</option>{alternatives.map(a => <option key={a.id} value={a.id}>{a.email}</option>)}</select></label> : null}<div className="mt-4 flex flex-wrap gap-2"><Button size="sm" disabled={pending || (needsReplacement && !replacement)} onClick={() => void run(async () => { cache.setQueryData(providerAccountsKey, await changeProviderAccount(removal.account.id, removal.action, replacement || undefined)); setRemoval(null); setMessage(t("providerAccounts.operationComplete")); })}>{t("confirm.confirm")}</Button><Button size="sm" variant="ghost" disabled={pending} onClick={() => setRemoval(null)}>{t("confirm.cancel")}</Button></div></div></div></Card>;
+		return <Card role="group" aria-label={t("providerAccounts.confirmChange")} className="border-warning/40 bg-warning/[0.04] shadow-none"><div className="flex gap-3 p-4"><div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning"><AlertCircle aria-hidden="true" className="size-4" /></div><div className="min-w-0 flex-1"><p className="font-medium">{t(removal.action === "sign-out" ? "providerAccounts.confirmSignOut" : "providerAccounts.confirmRemove", { email: removal.account.email })}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{removal.account.sessions.length ? t("providerAccounts.affectedSessions") : t("providerAccounts.noSessions")} {!accounts.some(a => a.provider === removal.account.provider && a.signedIn && a.id !== removal.account.id) ? ` ${t("providerAccounts.noAccountsConsequence")}` : ""}</p>{needsReplacement ? <label className="mt-3 flex flex-wrap items-center gap-2 text-xs font-medium">{t("providerAccounts.newPrimary")}<select className="h-8 rounded-md border border-border bg-background px-2 text-xs font-normal" aria-label={t("providerAccounts.replacementPrimary")} value={replacement} onChange={event => setReplacement(event.target.value)}><option value="">{t("providerAccounts.chooseAccount")}</option>{alternatives.map(a => <option key={a.id} value={a.id}>{a.email}</option>)}</select></label> : null}<div className="mt-4 flex flex-wrap gap-2"><Button size="sm" disabled={pending || (needsReplacement && !replacement)} onClick={() => void run(async () => { setAccountData(await changeProviderAccount(removal.account.id, removal.action, replacement || undefined)); setRemoval(null); setMessage(t("providerAccounts.operationComplete")); })}>{t("confirm.confirm")}</Button><Button size="sm" variant="ghost" disabled={pending} onClick={() => setRemoval(null)}>{t("confirm.cancel")}</Button></div></div></div></Card>;
 	}
 	function primaryChangeCardFor(account: ProviderAccount) {
 		if (primaryChange?.account.id !== account.id) return null;
 		const apply = (moveExisting: boolean) => void run(async () => {
-			cache.setQueryData(providerAccountsKey, await changeProviderAccount(account.id, "primary", undefined, moveExisting));
+			setAccountData(await changeProviderAccount(account.id, "primary", undefined, moveExisting));
 			void cache.invalidateQueries({ queryKey: ["session-provider-account"] });
 			setPrimaryChange(null);
 			setMessage(t(moveExisting ? "providerAccounts.primaryRequestsChanged" : "providerAccounts.primaryChanged", { provider: account.provider === "codex" ? "Codex" : "Claude" }));
@@ -189,7 +218,7 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 
 					<div id={`provider-content-${provider}`} hidden={isCollapsed}>
 					<div className="mx-4 mt-4 flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-						<input className="mt-0.5 size-4 accent-primary" type="checkbox" checked={Boolean(provider === "codex" ? query.data?.codexQuotaAutoSwitch : query.data?.claudeQuotaAutoSwitch)} disabled={pending || query.isLoading || signedInCount < 2} aria-label={t("providerAccounts.quotaAutoSwitch", { provider: providerName })} aria-describedby={signedInCount < 2 ? `provider-accounts-${provider}-quota-auto-switch-info` : undefined} onChange={event => void run(async () => { cache.setQueryData(providerAccountsKey, await setQuotaAutoSwitch(provider, event.target.checked)); })} />
+						<input className="mt-0.5 size-4 accent-primary" type="checkbox" checked={Boolean(provider === "codex" ? query.data?.codexQuotaAutoSwitch : query.data?.claudeQuotaAutoSwitch)} disabled={pending || query.isLoading || signedInCount < 2} aria-label={t("providerAccounts.quotaAutoSwitch", { provider: providerName })} aria-describedby={signedInCount < 2 ? `provider-accounts-${provider}-quota-auto-switch-info` : undefined} onChange={event => void run(async () => { setAccountData(await setQuotaAutoSwitch(provider, event.target.checked)); })} />
 						<div className="min-w-0 flex-1"><p className="text-xs font-medium text-foreground">{t("providerAccounts.quotaAutoSwitch", { provider: providerName })}</p>{signedInCount < 2 ? <p id={`provider-accounts-${provider}-quota-auto-switch-info`} className="mt-1 flex items-center gap-1.5 text-2xs text-muted-foreground"><AlertCircle role="img" aria-label={t("providerAccounts.quotaAutoSwitchRequiresAccount", { provider: providerName })} className="size-3" />{t("providerAccounts.quotaAutoSwitchRequiresAccount", { provider: providerName })}</p> : null}</div>
 					</div>
 
@@ -221,7 +250,7 @@ export function ProviderAccountsSection({ titleHidden }: { titleHidden?: boolean
 							return <div key={account.id} className="space-y-2"><Card data-testid={`provider-account-${account.id}`} className={`gap-0 border shadow-none ${account.primary ? "border-primary/60 bg-primary/[0.10] ring-1 ring-primary/20" : "border-border/70 bg-background/35"}`}>
 								<div className="flex flex-wrap items-start gap-3 p-4">
 									<div className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${account.signedIn ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"}`}><ShieldCheck aria-hidden="true" className="size-4" /></div>
-									<div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><div className="truncate font-medium">{account.email}</div>{account.primary ? <Badge variant="accent" className="h-5 gap-1 px-1.5 text-2xs"><Check aria-hidden="true" className="size-3" />{t("providerAccounts.default")}</Badge> : null}</div><div className="mt-1 text-xs text-muted-foreground">{t("providerAccounts.sessionSummary", { status, count: account.sessions.length })}</div></div>
+									<div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2">{editingAccountId === account.id ? <input autoFocus className="h-7 min-w-0 max-w-full rounded-md border border-primary bg-background px-2 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("providerAccounts.accountName")} value={draftName} onChange={event => setDraftName(event.target.value)} onBlur={() => finishRename(account)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); finishRename(account); } if (event.key === "Escape") { setEditingAccountId(null); setDraftName(""); } }} /> : <div tabIndex={0} className="truncate font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" onDoubleClick={() => beginRename(account)} onKeyDown={event => { if (event.key === "Enter") beginRename(account); }} title={t("providerAccounts.renameHint")}>{account.displayName || `${account.provider === "codex" ? "Codex" : "Claude"} account`}</div>}{account.primary ? <Badge variant="accent" className="h-5 gap-1 px-1.5 text-2xs"><Check aria-hidden="true" className="size-3" />{t("providerAccounts.default")}</Badge> : null}</div><div tabIndex={0} className="mt-1 w-fit max-w-full truncate text-xs text-muted-foreground blur-sm outline-none transition-[filter] hover:blur-none focus:blur-none" title={account.email}>{account.email}</div><div className="mt-1 text-xs text-muted-foreground">{t("providerAccounts.sessionSummary", { status, count: account.sessions.length })}</div></div>
 									<div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
 										{account.signedIn ? <>{!account.primary ? <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" disabled={pending} onClick={() => { setRemoval(null); setPrimaryChange({ account }); }}><Check aria-hidden="true" className="size-3.5" />{t("providerAccounts.useAsDefault")}</Button> : null}<Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" disabled={pending} onClick={() => { setPrimaryChange(null); setReplacement(""); setRemoval({ account, action: "sign-out" }); }}><LogOut aria-hidden="true" className="size-3.5" />{t("shell.signOut")}</Button></> : <><Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" disabled={pending || login?.status === "waiting"} onClick={() => beginLogin(provider, account.id)}><LogIn aria-hidden="true" className="size-3.5" />{t("providerAccounts.signInAgain")}</Button><Button size="icon" variant="ghost" className="text-destructive hover:text-destructive" aria-label={t("shell.remove")} title={t("shell.remove")} disabled={pending} onClick={() => { setPrimaryChange(null); setReplacement(""); setRemoval({ account, action: "remove" }); }}><Trash2 aria-hidden="true" className="size-4" /></Button></>}
 									</div>

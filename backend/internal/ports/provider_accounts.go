@@ -32,6 +32,9 @@ var ErrProviderQuotaSwitchRequiresReplacement = errors.New("automatic quota swit
 // ErrProviderAccountUnknown reports an account absent from the catalogue.
 var ErrProviderAccountUnknown = errors.New("provider account not found")
 
+// ErrProviderAccountNameInvalid reports an empty or overly long display name.
+var ErrProviderAccountNameInvalid = errors.New("account name must be between 1 and 80 characters")
+
 // ErrProviderAccountIncompatible reports an account or operation for a different provider.
 var ErrProviderAccountIncompatible = errors.New("account does not match the session provider")
 

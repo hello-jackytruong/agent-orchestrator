@@ -1,16 +1,38 @@
 package domain
 
-import "time"
+import (
+	"hash/fnv"
+	"strings"
+	"time"
+)
 
 // ProviderAccount is AO's safe identity plus a private upstream credential
 // reference. Empty CredentialRef is the durable signed-out fact.
 type ProviderAccount struct {
 	ID            string `json:"id"`
 	Provider      string `json:"provider"`
+	DisplayName   string `json:"display_name,omitempty"`
 	Email         string `json:"email"`
 	Kind          string `json:"kind,omitempty"`
 	CredentialRef string `json:"credential_ref"`
 	AuthID        string `json:"auth_id"`
+}
+
+// GeneratedProviderAccountName gives older accounts a stable friendly label
+// without depending on provider profile APIs.
+func GeneratedProviderAccountName(provider, id string) string {
+	words := []string{"Cedar", "Maple", "Willow", "River", "Summit", "Harbor", "Meadow", "Pine", "Juniper", "Clover", "Ember", "Atlas"}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(strings.ToLower(provider + ":" + id)))
+	word := words[int(h.Sum32())%len(words)]
+	name := "Account"
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "codex":
+		name = "Codex"
+	case "claude":
+		name = "Claude"
+	}
+	return word + " " + name
 }
 
 // ProviderAccountUsage is a safe, short-lived view of upstream quota data.

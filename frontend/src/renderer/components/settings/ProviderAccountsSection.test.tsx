@@ -17,9 +17,9 @@ function renderAccounts() {
 function accountRow(email: string) {
 	return screen.getByText(email).closest<HTMLElement>('[data-testid^="provider-account-"]')!;
 }
-const alice: ProviderAccount = { id: "a", provider: "codex", email: "alice@example.test", signedIn: true, primary: true, sessions: ["session-a"] };
-const bob: ProviderAccount = { id: "b", provider: "codex", email: "bob@example.test", signedIn: true, primary: false, sessions: ["session-b", "session-c"] };
-const clara: ProviderAccount = { id: "c", provider: "claude", email: "clara@example.test", signedIn: true, primary: true, sessions: [] };
+const alice: ProviderAccount = { id: "a", provider: "codex", displayName: "Cedar Codex", email: "alice@example.test", signedIn: true, primary: true, sessions: ["session-a"] };
+const bob: ProviderAccount = { id: "b", provider: "codex", displayName: "Maple Codex", email: "bob@example.test", signedIn: true, primary: false, sessions: ["session-b", "session-c"] };
+const clara: ProviderAccount = { id: "c", provider: "claude", displayName: "Willow Claude", email: "clara@example.test", signedIn: true, primary: true, sessions: [] };
 beforeEach(() => {
 	vi.clearAllMocks();
 	inventory = { accounts: [structuredClone(alice), structuredClone(bob), structuredClone(clara)], defaults: [{ provider: "codex", primaryId: "a", managed: true }, { provider: "claude", primaryId: "c", managed: true }], recoveryRequired: false, codexQuotaAutoSwitch: false, claudeQuotaAutoSwitch: false };
@@ -46,6 +46,22 @@ describe("provider account inventory", () => {
 		expect(within(accountRow(alice.email)).getByRole("button", { name: "Sign out" })).toBeInTheDocument();
 		expect(within(accountRow(alice.email)).queryByRole("button", { name: "Remove" })).toBeNull();
 		expect(screen.getByText(/choose whether it affects new sessions only/)).toBeInTheDocument();
+	});
+	it("renames an account inline while keeping its email private", async () => {
+		const user = userEvent.setup();
+		const renamed = { ...inventory, accounts: inventory.accounts.map(account => account.id === "a" ? { ...account, displayName: "Work Codex" } : account) };
+		mock.patch.mockImplementation(async (path: string) => path === "/api/v1/provider-accounts/{accountId}" ? { data: renamed } : { data: inventory });
+		renderAccounts();
+		await screen.findByText(alice.displayName);
+		const name = screen.getByText(alice.displayName);
+		expect(screen.getByText(alice.email)).toHaveClass("blur-sm");
+		await user.dblClick(name);
+		const input = screen.getByRole("textbox", { name: "Account name" });
+		await user.clear(input);
+		await user.type(input, "Work Codex");
+		await user.keyboard("{Enter}");
+		expect(mock.patch).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}", { params: { path: { accountId: "a" } }, body: { displayName: "Work Codex" } });
+		await screen.findByText("Account name updated.");
 	});
 	it("shows provider usage without changing account controls", async () => {
 		inventory.accounts[0].usage = { status: "available", plan: "Pro", windows: [{ name: "5 hour", remainingFraction: 0.75, resetTime: "2030-01-01T00:00:00Z" }] };

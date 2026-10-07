@@ -69,7 +69,7 @@ export function SessionProviderAccountMenuItem({ sessionId }: { sessionId: strin
 			<DropdownMenuSubTrigger disabled={pending}>
 				<UserRound aria-hidden="true" className="size-3.5" />
 				<span>{t("providerAccounts.switchAccount")}</span>
-				{current ? <span className="ml-auto max-w-28 truncate text-2xs text-passive">{current.email}</span> : null}
+				{current ? <span className="ml-auto max-w-28 truncate text-2xs text-passive">{current.displayName || current.email}</span> : null}
 			</DropdownMenuSubTrigger>
 			<DropdownMenuSubContent className="min-w-56 text-xs">
 				{choices.length ? choices.map((account) => (
@@ -80,7 +80,7 @@ export function SessionProviderAccountMenuItem({ sessionId }: { sessionId: strin
 						onSelect={() => selectAccount(account.id)}
 					>
 						<Check aria-hidden="true" className={account.id === route.data?.accountId ? "size-3.5" : "invisible size-3.5"} />
-						<span className="min-w-0 flex-1 truncate">{account.email}</span>
+						<span className="min-w-0 flex-1 truncate">{account.displayName || account.email}</span>
 						{account.primary ? <span className="text-2xs text-passive">{t("providerAccounts.default")}</span> : null}
 					</DropdownMenuItem>
 				)) : (

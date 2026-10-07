@@ -6,17 +6,10 @@ import { useUiStore } from "../stores/ui-store";
 import type { ProjectSettingsSaveState } from "./ProjectSettingsForm";
 import { SettingsDialog } from "./SettingsDialog";
 
-const { postMock } = vi.hoisted(() => ({ postMock: vi.fn() }));
-
-const accountsResponse = {
-	accountRevision: 0,
-	accounts: [],
-	capabilities: {},
-	deviceReconciliation: { status: "verified", activeAccountVerified: false, reasonCode: "verified", retryable: false },
-};
+const { getMock, postMock } = vi.hoisted(() => ({ getMock: vi.fn(), postMock: vi.fn() }));
 
 vi.mock("../lib/api-client", () => ({
-	apiClient: { POST: postMock },
+	apiClient: { GET: getMock, POST: postMock },
 	apiErrorCode: (error: { code?: string }) => error?.code,
 	apiErrorMessage: () => "request failed",
 	hasTrustedApiBaseUrl: () => true,
@@ -75,9 +68,8 @@ vi.mock("../hooks/useCloudGate", () => ({
 
 describe("SettingsDialog", () => {
 	beforeEach(() => {
-		postMock.mockReset().mockImplementation((path: string) => path === "/api/v1/agents/codex/accounts/ensure"
-			? Promise.resolve({ data: accountsResponse })
-			: Promise.resolve({ data: { operationId: "login-1", status: "cancelled" } }));
+		getMock.mockReset().mockResolvedValue({ data: { accounts: [], defaults: [], recoveryRequired: false } });
+		postMock.mockReset().mockResolvedValue({ data: {} });
 		useUiStore.setState({ settingsModal: null });
 	});
 
@@ -136,7 +128,6 @@ describe("SettingsDialog", () => {
 
 		expect(await screen.findByTestId("global-settings-section")).toHaveTextContent("mobile");
 		expect(screen.getByRole("button", { name: "Mobile" })).toHaveAttribute("aria-current", "page");
-		expect(postMock).not.toHaveBeenCalledWith("/api/v1/agents/codex/accounts/ensure", expect.anything());
 	});
 
 	it("keeps the settings surface above its blurred backdrop", async () => {
@@ -191,7 +182,6 @@ describe("SettingsDialog", () => {
 
 		await screen.findByTestId("global-settings-section");
 		await userEvent.click(screen.getByRole("button", { name: "Harness" }));
-		expect(postMock).not.toHaveBeenCalledWith("/api/v1/agents/codex/accounts/ensure", expect.anything());
 	});
 
 	it("mounts dialog chrome before the selected settings form", async () => {
@@ -228,7 +218,6 @@ describe("SettingsDialog", () => {
 		await userEvent.click(screen.getByRole("button", { name: "Close settings" }));
 
 		await vi.waitFor(() => expect(useUiStore.getState().settingsModal).toBeNull());
-		expect(postMock.mock.calls.map(([path]) => path)).not.toContain("/api/v1/agents/codex/accounts/ensure");
 	});
 
 	it("traps focus and closes from Escape or the backdrop", async () => {

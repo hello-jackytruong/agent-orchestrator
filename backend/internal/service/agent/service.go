@@ -82,28 +82,19 @@ type Service struct {
 	discoverySlots    chan struct{}
 	ctx               context.Context
 	now               func() time.Time
-	codexAccounts     *codexAccountManager
-	codexSwitches     *codexAccountSwitchCoordinator
 	logger            *slog.Logger
 }
 
 // Deps contains optional durable dependencies for the agent catalog service.
 type Deps struct {
-	Cache                  ports.AgentModelCatalogCache
-	Discoverer             ports.AgentModelDiscoverer
-	ModelDiscoveryDir      string
-	Projects               ProjectLookup
-	Sessions               SessionUsageLookup
-	Context                context.Context
-	Logger                 *slog.Logger
-	CodexAccountRoot       string
-	CodexPendingRoot       string
-	CodexSwitchStagingRoot string
-	CodexGlobalHome        string
-	CodexAccounts          ports.CodexAccountClientFactory
-	CodexAccountSwitches   ports.CodexAccountSwitchStore
-	CodexOperationGate     ports.CodexOperationGate
-	// Clock overrides time.Now for deterministic account-bootstrap retry tests.
+	Cache             ports.AgentModelCatalogCache
+	Discoverer        ports.AgentModelDiscoverer
+	ModelDiscoveryDir string
+	Projects          ProjectLookup
+	Sessions          SessionUsageLookup
+	Context           context.Context
+	Logger            *slog.Logger
+	// Clock overrides time.Now for deterministic catalog tests.
 	Clock func() time.Time
 }
 
@@ -133,27 +124,9 @@ func NewWithDeps(deps Deps) *Service {
 	if deps.Logger != nil {
 		svc.logger = deps.Logger
 	}
-	if deps.CodexAccountRoot != "" && deps.CodexGlobalHome != "" {
-		svc.codexAccounts = newCodexAccountManager(deps.Context, deps.CodexAccountRoot, deps.CodexPendingRoot, deps.CodexSwitchStagingRoot, deps.CodexGlobalHome, deps.CodexAccounts, deps.Logger, deps.CodexOperationGate)
-		if deps.Clock != nil {
-			svc.codexAccounts.now = deps.Clock
-		}
-	}
 	svc.readiness = newReadinessCoordinator(readinessCoordinatorConfig{
 		Agents: agents, Factory: agentregistry.Harnessed, Context: deps.Context, Logger: deps.Logger,
-		AuthenticationCheck: svc.structuredCodexAuthentication,
 	})
-	if svc.codexAccounts != nil {
-		svc.codexAccounts.onAuthenticationChanged = func() {
-			svc.readiness.Invalidate(string(domain.HarnessCodex), readinessInvalidateAuthentication)
-		}
-	}
-	if svc.codexAccounts != nil && deps.CodexAccountSwitches != nil && deps.CodexOperationGate != nil {
-		svc.codexSwitches = newCodexAccountSwitchCoordinator(
-			deps.Context, svc, deps.CodexAccountSwitches, deps.CodexOperationGate,
-			deps.Clock, svc.PublishCodexAccounts,
-		)
-	}
 	svc.sessions = deps.Sessions
 	if deps.Context != nil {
 		svc.ctx = deps.Context

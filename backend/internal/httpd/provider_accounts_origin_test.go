@@ -29,7 +29,7 @@ func TestProviderAccountOriginBoundaryCoversCatalogueAndSessionChoice(t *testing
 			for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, "OPTIONS"} {
 				t.Run(method+path+origin.origin, func(t *testing.T) {
 					called := false
-					handler := codexAccountOriginMiddleware([]string{"app://renderer", "http://127.0.0.1:5173"})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = true; w.WriteHeader(http.StatusNoContent) }))
+					handler := managedAccountOriginMiddleware([]string{"app://renderer", "http://127.0.0.1:5173"})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = true; w.WriteHeader(http.StatusNoContent) }))
 					request := httptest.NewRequest(method, path, nil)
 					request.Header.Set("Origin", origin.origin)
 					response := httptest.NewRecorder()
@@ -49,7 +49,7 @@ func TestProviderAccountOriginPathDoesNotCaptureOtherSessionAPIs(t *testing.T) {
 	for _, path := range []string{"/api/v1/sessions/s", "/api/v1/sessions/s/conversation", "/api/v1/sessions/s/provider-accounting", "/api/v1/provider-accounts-other", "/health"} {
 		t.Run(path, func(t *testing.T) {
 			called := false
-			handler := codexAccountOriginMiddleware([]string{"app://renderer"})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = true; w.WriteHeader(http.StatusNoContent) }))
+			handler := managedAccountOriginMiddleware([]string{"app://renderer"})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = true; w.WriteHeader(http.StatusNoContent) }))
 			request := httptest.NewRequest(http.MethodPost, path, nil)
 			request.Header.Set("Origin", "http://preview.session.localhost:9876")
 			response := httptest.NewRecorder()

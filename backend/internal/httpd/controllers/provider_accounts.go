@@ -30,6 +30,10 @@ type providerPrimaryOptions interface {
 	SetPrimaryWithOptions(context.Context, string, bool) error
 }
 
+type providerAccountRenamer interface {
+	Rename(context.Context, string, string) error
+}
+
 type providerAccountUsageReader interface {
 	AccountUsages(context.Context, []domain.ProviderAccount) map[string]domain.ProviderAccountUsage
 }
@@ -55,6 +59,7 @@ func (c *ProviderAccountsController) Register(r chi.Router) {
 	r.Get("/provider-accounts/login/{loginId}", c.loginStatus)
 	r.Delete("/provider-accounts/login/{loginId}", c.cancelLogin)
 	r.Put("/provider-accounts/{accountId}/primary", c.setPrimary)
+	r.Patch("/provider-accounts/{accountId}", c.rename)
 	r.Post("/provider-accounts/{accountId}/sign-out", c.signOut)
 	r.Delete("/provider-accounts/{accountId}", c.remove)
 	r.Get("/sessions/{sessionId}/provider-account", c.sessionAccount)
@@ -76,6 +81,8 @@ func accountAPIError(err error) error {
 		return apierr.Conflict("QUOTA_AUTO_SWITCH_REQUIRES_SECOND_ACCOUNT", ports.ErrProviderQuotaSwitchRequiresReplacement.Error(), nil)
 	case errors.Is(err, ports.ErrProviderAccountUnknown):
 		return apierr.NotFound("PROVIDER_ACCOUNT_NOT_FOUND", ports.ErrProviderAccountUnknown.Error())
+	case errors.Is(err, ports.ErrProviderAccountNameInvalid):
+		return apierr.Invalid("PROVIDER_ACCOUNT_NAME_INVALID", ports.ErrProviderAccountNameInvalid.Error(), nil)
 	case errors.Is(err, ports.ErrProviderLoginRequired):
 		return apierr.Conflict("PROVIDER_LOGIN_REQUIRED", ports.ErrProviderLoginRequired.Error(), nil)
 	case errors.Is(err, ports.ErrProviderAccountIncompatible):
@@ -131,14 +138,21 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 		primaries[p.Provider] = p.PrimaryID
 	}
 	usageByAccount := map[string]domain.ProviderAccountUsage{}
-	if reader, ok := c.Svc.(providerAccountUsageReader); ok {
-		usageByAccount = reader.AccountUsages(r.Context(), state.Accounts)
+	includeUsage := r.URL.Query().Get("includeUsage") != "false"
+	if includeUsage {
+		if reader, ok := c.Svc.(providerAccountUsageReader); ok {
+			usageByAccount = reader.AccountUsages(r.Context(), state.Accounts)
+		}
 	}
 	for _, provider := range []string{"codex", "claude"} {
 		result.Defaults = append(result.Defaults, ProviderPrimaryView{Provider: provider, PrimaryID: primaries[provider], Managed: true})
 	}
 	for _, a := range state.Accounts {
-		view := ProviderAccountView{ID: a.ID, Provider: a.Provider, Email: a.Email, Kind: a.Kind, SignedIn: a.CredentialRef != "", Primary: primaries[a.Provider] == a.ID, Sessions: []string{}}
+		displayName := a.DisplayName
+		if displayName == "" {
+			displayName = domain.GeneratedProviderAccountName(a.Provider, a.ID)
+		}
+		view := ProviderAccountView{ID: a.ID, Provider: a.Provider, DisplayName: displayName, Email: a.Email, Kind: a.Kind, SignedIn: a.CredentialRef != "", Primary: primaries[a.Provider] == a.ID, Sessions: []string{}}
 		if usage, ok := usageByAccount[a.ID]; ok {
 			view.Usage = providerAccountUsageView(usage)
 		}
@@ -150,6 +164,27 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 		result.Accounts = append(result.Accounts, view)
 	}
 	envelope.WriteJSON(w, 200, result)
+}
+
+func (c *ProviderAccountsController) rename(w http.ResponseWriter, r *http.Request) {
+	if !c.ready(w, r) {
+		return
+	}
+	service, ok := c.Svc.(providerAccountRenamer)
+	if !ok {
+		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "service_unavailable", "PROVIDER_ACCOUNTS_UNAVAILABLE", "Account renaming is unavailable in this build", nil)
+		return
+	}
+	var input ProviderAccountNameRequest
+	if err := decodeAccountJSON(r, &input); err != nil {
+		envelope.WriteError(w, r, apierr.Invalid("INVALID_JSON", "Invalid account name request", nil))
+		return
+	}
+	if err := service.Rename(r.Context(), chi.URLParam(r, "accountId"), input.DisplayName); err != nil {
+		envelope.WriteError(w, r, accountAPIError(err))
+		return
+	}
+	c.list(w, r)
 }
 
 func providerAccountUsageView(usage domain.ProviderAccountUsage) *ProviderAccountUsageView {

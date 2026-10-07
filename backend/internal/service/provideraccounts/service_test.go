@@ -278,6 +278,29 @@ func TestProviderAccountPrimaryChangesOnlyNewSessions(t *testing.T) {
 	h.assign(t, "new", domain.HarnessCodex, selected)
 	h.route(t, "new", bob)
 }
+
+func TestProviderAccountDisplayNameIsGeneratedAndEditable(t *testing.T) {
+	h := setupAccounts(t)
+	id := h.login(t, "codex", "alice@example.test")
+	state, err := h.svc.State(h.ctx)
+	if err != nil || len(state.Accounts) != 1 || state.Accounts[0].DisplayName == "" {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	initial := state.Accounts[0].DisplayName
+	if err := h.svc.Rename(h.ctx, id, "  Work   Codex "); err != nil {
+		t.Fatal(err)
+	}
+	state, err = h.svc.State(h.ctx)
+	if err != nil || state.Accounts[0].DisplayName != "Work Codex" {
+		t.Fatalf("renamed state=%+v err=%v", state, err)
+	}
+	if initial == state.Accounts[0].DisplayName {
+		t.Fatalf("rename did not change generated name %q", initial)
+	}
+	if err := h.svc.Rename(h.ctx, id, "   "); !errors.Is(err, ports.ErrProviderAccountNameInvalid) {
+		t.Fatalf("blank rename err=%v", err)
+	}
+}
 func TestProviderAccountExplicitChoiceWinsOverPrimary(t *testing.T) {
 	h := setupAccounts(t)
 	alice := h.login(t, "codex", "alice@example.com")

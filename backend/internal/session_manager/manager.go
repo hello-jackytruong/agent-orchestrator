@@ -448,7 +448,6 @@ type Manager struct {
 	// workspace hook commands resolve back to this daemon. Tests inject a stub.
 	executable                     func() (string, error)
 	newLaunchID                    func() string
-	codexOperationGate             ports.CodexOperationGate
 	startupBackgroundReconcileDone chan struct{}
 	startupBackgroundReconcileOnce sync.Once
 	statusRecoveryMu               sync.RWMutex
@@ -769,9 +768,6 @@ type Deps struct {
 	Executable func() (string, error)
 	// NewLaunchID overrides supervised-process generation for deterministic tests.
 	NewLaunchID func() string
-	// CodexOperationGate is shared with account clients and reviewer launches.
-	// Nil preserves focused-test compatibility by disabling device-global gating.
-	CodexOperationGate ports.CodexOperationGate
 	// ReconcileWorkers bounds concurrent live-session recovery during daemon
 	// startup. Values below one preserve the serial default for embedders/tests;
 	// production explicitly opts into a small worker pool.
@@ -814,7 +810,6 @@ func New(d Deps) *Manager {
 		lookPath:                       d.LookPath,
 		executable:                     d.Executable,
 		newLaunchID:                    d.NewLaunchID,
-		codexOperationGate:             defaultCodexOperationGate(d.CodexOperationGate),
 		backgroundContext:              d.BackgroundContext,
 		startupBackgroundReconcileDone: make(chan struct{}),
 		agentOperations:                make(map[domain.SessionID]agentOperationKind),

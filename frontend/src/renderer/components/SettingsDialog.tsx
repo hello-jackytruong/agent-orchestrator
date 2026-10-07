@@ -1,5 +1,6 @@
 import { Bot, Disc3, Loader2, MonitorCog, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useCloudGate } from "../hooks/useCloudGate";
@@ -10,6 +11,7 @@ import { DialogHeader, settingsDialogBodyClass, settingsDialogHeaderClass, setti
 import { type GlobalSettingsSection, type ProjectSettingsSection, type SettingsModal, useUiStore } from "../stores/ui-store";
 import { cn } from "../lib/utils";
 import { globalSettingsItem, visibleGlobalSettings } from "./settings/settingsCatalog";
+import { fetchProviderAccounts, providerAccountsCatalogueKey, providerAccountsKey } from "../hooks/useProviderAccounts";
 
 function initialProjectSaveState(): ProjectSettingsSaveState {
 	return { phase: "idle" };
@@ -29,10 +31,24 @@ export function SettingsDialog() {
 function SettingsDialogLayer({ settingsModal }: { settingsModal: SettingsModal }) {
 	const { t } = useTranslation();
 	const closeSettings = useUiStore((state) => state.closeSettings);
+	const queryClient = useQueryClient();
 	// Reads the daemon settings the dialog tree already queries; no extra fetch.
 	const { cloudEnabled } = useCloudGate();
 
 	const displaySettings = settingsModal;
+	useEffect(() => {
+		if (settingsModal.scope === "project") return;
+		void queryClient.prefetchQuery({
+			queryKey: providerAccountsCatalogueKey,
+			queryFn: () => fetchProviderAccounts(false),
+			staleTime: 0,
+		});
+		void queryClient.prefetchQuery({
+			queryKey: providerAccountsKey,
+			queryFn: fetchProviderAccounts,
+			staleTime: 0,
+		});
+	}, [queryClient, settingsModal.scope]);
 	// The selected page includes several store/query subscribers. Mount it one
 	// frame after the lightweight dialog chrome so the opening interaction can
 	// paint first.

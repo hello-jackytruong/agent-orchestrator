@@ -298,7 +298,56 @@ func (s *Service) acquireAccountMutation(ctx context.Context, ids []domain.Sessi
 // State reads durable account facts.
 func (s *Service) State(ctx context.Context) (domain.ProviderAccountState, error) {
 	state, _, err := s.store.LoadProviderAccountState(ctx)
+	if err == nil {
+		fillMissingDisplayNames(&state)
+	}
 	return state, err
+}
+
+func fillMissingDisplayNames(state *domain.ProviderAccountState) {
+	used := make(map[string]bool, len(state.Accounts))
+	for _, account := range state.Accounts {
+		if account.DisplayName != "" {
+			used[account.DisplayName] = true
+		}
+	}
+	for i := range state.Accounts {
+		if state.Accounts[i].DisplayName == "" {
+			state.Accounts[i].DisplayName = nextAccountName(state.Accounts[i].Provider, state.Accounts[i].ID, used)
+			used[state.Accounts[i].DisplayName] = true
+		}
+	}
+}
+
+func nextAccountName(provider, id string, used map[string]bool) string {
+	base := domain.GeneratedProviderAccountName(provider, id)
+	if !used[base] {
+		return base
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s %d", base, n)
+		if !used[candidate] {
+			return candidate
+		}
+	}
+}
+
+// Rename changes only the local display label; routing continues to use the
+// account's stable ID.
+func (s *Service) Rename(ctx context.Context, id, displayName string) error {
+	name := strings.Join(strings.Fields(displayName), " ")
+	if len([]rune(name)) == 0 || len([]rune(name)) > 80 {
+		return ports.ErrProviderAccountNameInvalid
+	}
+	return s.mutate(ctx, func(state *domain.ProviderAccountState) (string, error) {
+		for i := range state.Accounts {
+			if state.Accounts[i].ID == id {
+				state.Accounts[i].DisplayName = name
+				return "", nil
+			}
+		}
+		return "", ports.ErrProviderAccountUnknown
+	})
 }
 func account(state domain.ProviderAccountState, id string) (domain.ProviderAccount, bool) {
 	for _, a := range state.Accounts {
@@ -591,6 +640,11 @@ func (s *Service) RecordCredential(ctx context.Context, verified ports.VerifiedP
 		id = s.newID()
 	}
 	err := s.mutate(ctx, func(state *domain.ProviderAccountState) (string, error) {
+		fillMissingDisplayNames(state)
+		used := make(map[string]bool, len(state.Accounts))
+		for _, account := range state.Accounts {
+			used[account.DisplayName] = true
+		}
 		if old, ok := account(*state, id); ok {
 			if old.Provider != provider || !strings.EqualFold(old.Email, email) {
 				return "", ports.ErrProviderAccountIncompatible
@@ -603,7 +657,7 @@ func (s *Service) RecordCredential(ctx context.Context, verified ports.VerifiedP
 			}
 			for i, a := range state.Accounts {
 				if a.ID == id {
-					state.Accounts[i] = domain.ProviderAccount{ID: id, Provider: provider, Email: email, Kind: kind, CredentialRef: credentialRef, AuthID: authID}
+					state.Accounts[i] = domain.ProviderAccount{ID: id, Provider: provider, DisplayName: old.DisplayName, Email: email, Kind: kind, CredentialRef: credentialRef, AuthID: authID}
 				}
 			}
 		} else {
@@ -619,7 +673,7 @@ func (s *Service) RecordCredential(ctx context.Context, verified ports.VerifiedP
 					return "", fmt.Errorf("account already exists; sign in to its existing entry: %w", ports.ErrProviderAccountConflict)
 				}
 			}
-			state.Accounts = append(state.Accounts, domain.ProviderAccount{ID: id, Provider: provider, Email: email, Kind: kind, CredentialRef: credentialRef, AuthID: authID})
+			state.Accounts = append(state.Accounts, domain.ProviderAccount{ID: id, Provider: provider, DisplayName: nextAccountName(provider, id, used), Email: email, Kind: kind, CredentialRef: credentialRef, AuthID: authID})
 		}
 		current, _ := primary(*state, provider)
 		if current == "" {

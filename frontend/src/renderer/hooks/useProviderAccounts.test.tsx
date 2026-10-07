@@ -39,6 +39,12 @@ describe("provider identity and account API", () => {
 		await expect(fetchProviderAccounts()).rejects.toThrow("Account catalogue unavailable");
 		expect(api.get).toHaveBeenCalledTimes(1);
 	});
+	it("can fetch the account catalogue without waiting for usage", async () => {
+		const catalogue = { accounts: [], defaults: [], recoveryRequired: false };
+		api.get.mockResolvedValue({ data: catalogue });
+		expect(await fetchProviderAccounts(false)).toBe(catalogue);
+		expect(api.get).toHaveBeenCalledWith("/api/v1/provider-accounts", { params: { query: { includeUsage: false } } });
+	});
 	it("changes a primary without any session reassignment body", async () => {
 		const result = { accounts: [], defaults: [], recoveryRequired: false };
 		api.put.mockResolvedValue({ data: result });

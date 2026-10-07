@@ -13,8 +13,8 @@ vi.mock("../lib/api-client", () => ({
 
 const inventory = {
 	accounts: [
-		{ id: "alice", provider: "codex", email: "alice@example.test", signedIn: true, primary: true, sessions: ["session-1"] },
-		{ id: "bob", provider: "codex", email: "bob@example.test", signedIn: true, primary: false, sessions: [] },
+		{ id: "alice", provider: "codex", displayName: "Harbor Codex", email: "alice@example.test", signedIn: true, primary: true, sessions: ["session-1"] },
+		{ id: "bob", provider: "codex", displayName: "Summit Codex", email: "bob@example.test", signedIn: true, primary: false, sessions: [] },
 	],
 	defaults: [{ provider: "codex", primaryId: "alice", managed: true }],
 	recoveryRequired: false,
@@ -41,7 +41,7 @@ describe("session account actions", () => {
 		expect(switchItem).toBeInTheDocument();
 		await user.hover(switchItem);
 		await waitFor(() => expect(switchItem).toHaveAttribute("aria-expanded", "true"));
-		expect(await screen.findByRole("menuitem", { name: /bob@example.test/ })).toBeInTheDocument();
+		expect(await screen.findByRole("menuitem", { name: /Summit Codex/ })).toBeInTheDocument();
 	});
 
 	it("switches the current session from the submenu without a separate toolbar", async () => {
@@ -51,7 +51,7 @@ describe("session account actions", () => {
 		const switchItem = await screen.findByRole("menuitem", { name: /Switch account/ });
 		await user.hover(switchItem);
 		await waitFor(() => expect(switchItem).toHaveAttribute("aria-expanded", "true"));
-		fireEvent.click(await screen.findByRole("menuitem", { name: /bob@example.test/ }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Summit Codex/ }));
 		await waitFor(() => expect(api.put).toHaveBeenCalledWith(
 			"/api/v1/sessions/{sessionId}/provider-account",
 			{ params: { path: { sessionId: "session-1" } }, body: { accountId: "bob" } },

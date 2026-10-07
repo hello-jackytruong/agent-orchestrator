@@ -25,14 +25,18 @@ type accountHTTPFake struct {
 	replacement       string
 	signOut           bool
 	moveExisting      *bool
+	renameID          string
+	renameName        string
 }
 
 type usageHTTPFake struct {
 	*accountHTTPFake
 	usage map[string]domain.ProviderAccountUsage
+	calls int
 }
 
 func (f *usageHTTPFake) AccountUsages(context.Context, []domain.ProviderAccount) map[string]domain.ProviderAccountUsage {
+	f.calls++
 	return f.usage
 }
 
@@ -63,6 +67,10 @@ func (f *accountHTTPFake) SessionAccount(_ context.Context, id domain.SessionID)
 	return f.route, f.managed, f.err
 }
 func (f *accountHTTPFake) RecoveryRequired(context.Context) (bool, error) { return f.recovery, f.err }
+func (f *accountHTTPFake) Rename(_ context.Context, id, name string) error {
+	f.renameID, f.renameName = id, name
+	return f.err
+}
 
 type loginHTTPFake struct {
 	login ports.ProviderLogin
@@ -147,6 +155,22 @@ func TestProviderAccountsHTTPIncludesSafeUsageSummary(t *testing.T) {
 		t.Fatal("private account data leaked through usage response")
 	}
 }
+
+func TestProviderAccountsHTTPCanReturnCatalogueWithoutWaitingForUsage(t *testing.T) {
+	base := &accountHTTPFake{state: domain.ProviderAccountState{Accounts: []domain.ProviderAccount{{ID: "a", Provider: "codex", Email: "a@example.test", CredentialRef: "PRIVATE", AuthID: "PRIVATE-AUTH"}}}}
+	f := &usageHTTPFake{accountHTTPFake: base, usage: map[string]domain.ProviderAccountUsage{"a": {Status: "available", Plan: "Pro"}}}
+	out := accountHTTPRequest(t, &controllers.ProviderAccountsController{Svc: f}, "GET", "/provider-accounts?includeUsage=false", "")
+	if out.Code != 200 {
+		t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+	}
+	var response controllers.ProviderAccountsResponse
+	if err := json.Unmarshal(out.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if f.calls != 0 || response.Accounts[0].Usage != nil {
+		t.Fatalf("usage lookup was not skipped: calls=%d usage=%+v", f.calls, response.Accounts[0].Usage)
+	}
+}
 func TestProviderAccountsHTTPEmptyAndAdoptedProvider(t *testing.T) {
 	for _, adopted := range []bool{false, true} {
 		t.Run(map[bool]string{false: "no-primary", true: "managed-without-account"}[adopted], func(t *testing.T) {
@@ -187,6 +211,14 @@ func TestProviderAccountsHTTPMutationsCarryExactChoice(t *testing.T) {
 				t.Fatalf("status=%d calls=%v replacement=%s signOut=%v body=%s", out.Code, f.calls, f.replacement, f.signOut, out.Body.String())
 			}
 		})
+	}
+}
+
+func TestProviderAccountsHTTPRenamesWithoutExposingCredentials(t *testing.T) {
+	f := &accountHTTPFake{}
+	out := accountHTTPRequest(t, &controllers.ProviderAccountsController{Svc: f}, "PATCH", "/provider-accounts/account-one", `{"displayName":"Work Codex"}`)
+	if out.Code != 200 || f.renameID != "account-one" || f.renameName != "Work Codex" {
+		t.Fatalf("status=%d id=%s name=%s body=%s", out.Code, f.renameID, f.renameName, out.Body.String())
 	}
 }
 func TestProviderAccountsHTTPValidationDoesNotMutate(t *testing.T) {

@@ -6,16 +6,26 @@ export type ProviderAccount = components["schemas"]["ProviderAccountView"];
 export type ProviderAccounts = components["schemas"]["ProviderAccountsResponse"];
 export type ProviderLogin = components["schemas"]["ProviderLoginResponse"];
 export const providerAccountsKey = ["provider-accounts"] as const;
+export const providerAccountsCatalogueKey = ["provider-accounts", "catalogue"] as const;
 export function accountProvider(harness: string): string {
 	return harness === "codex" ? "codex" : harness === "claude-code" ? "claude" : "";
 }
-export async function fetchProviderAccounts(): Promise<ProviderAccounts> {
-	const { data, error } = await apiClient.GET("/api/v1/provider-accounts");
+export async function fetchProviderAccounts(includeUsage = true): Promise<ProviderAccounts> {
+	const response = includeUsage
+		? await apiClient.GET("/api/v1/provider-accounts")
+		: await apiClient.GET("/api/v1/provider-accounts", { params: { query: { includeUsage: false } } });
+	const { data, error } = response;
 	if (error) throw new Error(apiErrorMessage(error));
 	return data!;
 }
-export function useProviderAccounts(enabled = true) {
-	return useQuery({ queryKey: providerAccountsKey, queryFn: fetchProviderAccounts, enabled, refetchInterval: 30000, retry: 1 });
+export function useProviderAccounts(enabled = true, includeUsage = true) {
+	return useQuery({
+		queryKey: includeUsage ? providerAccountsKey : providerAccountsCatalogueKey,
+		queryFn: () => fetchProviderAccounts(includeUsage),
+		enabled,
+		refetchInterval: 30000,
+		retry: 1,
+	});
 }
 export async function setQuotaAutoSwitch(provider: "codex" | "claude", enabled: boolean): Promise<ProviderAccounts> {
 	const result = await apiClient.PATCH("/api/v1/provider-accounts/quota-auto-switch", { body: { provider, enabled } });
@@ -31,6 +41,11 @@ export async function changeProviderAccount(accountId: string, action: "primary"
 		: action === "sign-out"
 			? await apiClient.POST("/api/v1/provider-accounts/{accountId}/sign-out", { params, body })
 			: await apiClient.DELETE("/api/v1/provider-accounts/{accountId}", { params, body });
+	if (result.error) throw new Error(apiErrorMessage(result.error));
+	return result.data!;
+}
+export async function renameProviderAccount(accountId: string, displayName: string): Promise<ProviderAccounts> {
+	const result = await apiClient.PATCH("/api/v1/provider-accounts/{accountId}", { params: { path: { accountId } }, body: { displayName } });
 	if (result.error) throw new Error(apiErrorMessage(result.error));
 	return result.data!;
 }
