@@ -52,9 +52,6 @@ export const inspectorSectionHeaderInsetClass = "p-1.5";
 /** Body inset matches header label (panel px-1.5 + header button p-1.5). */
 export const inspectorSectionInsetClass = "px-3 pb-0";
 
-/** Bleed section cards to the accordion button edges (body px-3 vs header slot px-1.5). */
-export const inspectorSectionCardBleedClass = "-mx-1.5";
-
 /** Inspector tab section titles: sentence case, normal weight (not settings-rail small caps). */
 export const inspectorSectionHeadingClass =
 	"font-normal normal-case tracking-normal [&>span:first-child]:font-normal";
@@ -728,7 +725,7 @@ export function InspectorReviewsView({
 	if (groups.length === 0 && !liveReviewLabel) return null;
 	return (
 		<InspectorSection surface={false} title={labels.reviews} titleClassName={inspectorSectionHeadingClass}>
-			<div className={cn("flex flex-col gap-1.5", inspectorSectionCardBleedClass)}>
+			<div className="flex flex-col gap-1.5">
 				{liveReviewLabel ? (
 					<article
 						className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-settings-row px-3 py-2.5"
@@ -1507,7 +1504,7 @@ function ReviewSummaryCard({
 	const textEnd = useClampedTextEnd(bodyRef, !expanded && isOverflowing, body ?? "");
 	useEffect(() => setExpanded(false), [body]);
 	return (
-		<article className="flex min-w-0 flex-col gap-2 rounded-md border border-border/60 px-3 py-2.5">
+		<article className="flex min-w-0 flex-col gap-2 py-2.5">
 			{/* One line: who reviewed and when on the left, the verdict and its
 			    actions together on the right. The timing used to take a line of its
 			    own, which pushed the prose down and read as a second heading. */}

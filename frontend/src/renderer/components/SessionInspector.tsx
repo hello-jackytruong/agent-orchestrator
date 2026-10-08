@@ -2223,7 +2223,7 @@ function CloudReviewsSection({
 	};
 	const reviewState = cloudReviewsToLocal(reviewsQuery.data, session.provider);
 	return (
-		<div className="p-2">
+		<>
 			<ReviewPanel
 				cloud
 				autoReviewEnabled={autoReviewEnabled}
@@ -2279,7 +2279,7 @@ function CloudReviewsSection({
 				runs={reviewState.runs}
 				session={cloudSession}
 			/>
-		</div>
+		</>
 	);
 }
 
