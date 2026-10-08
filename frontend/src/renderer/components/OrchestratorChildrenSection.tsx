@@ -73,7 +73,7 @@ function ChildRow({ child, onOpen }: { child: OrchestratorChildView; onOpen: () 
 	return (
 		<div
 			className={cn(
-				"overflow-hidden rounded-settings-row bg-settings-row px-3 py-1.5",
+				"overflow-hidden rounded-lg bg-settings-row px-3 py-1.5",
 				child.isTerminated && "opacity-60",
 			)}
 			data-testid="orchestrator-child-row"

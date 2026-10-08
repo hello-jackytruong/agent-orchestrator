@@ -406,12 +406,12 @@ export function SessionInspectorSummaryView({
 			{branch}
 			{pullRequestTitle && pullRequestCards ? (
 				<InspectorSection surface={false} title={pullRequestTitle} titleClassName={inspectorSectionHeadingClass}>
-					<div className={cn("flex flex-col gap-1.5", inspectorSectionCardBleedClass)}>{pullRequestCards}</div>
+					<div className="flex flex-col gap-1.5">{pullRequestCards}</div>
 				</InspectorSection>
 			) : null}
 			{artifactTitle ? (
 				<InspectorSection surface={false} title={artifactTitle} titleClassName={inspectorSectionHeadingClass}>
-					<div className={cn("flex flex-col gap-1.5", inspectorSectionCardBleedClass)}>{artifactCards}</div>
+					<div className="flex flex-col gap-1.5">{artifactCards}</div>
 				</InspectorSection>
 			) : null}
 			{reviews}

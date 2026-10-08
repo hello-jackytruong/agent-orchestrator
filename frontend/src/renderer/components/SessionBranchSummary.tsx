@@ -145,42 +145,46 @@ export function SessionBranchSummary({
 	}
 
 	return (
-		<section aria-label={t("inspector.branch")} className="mb-4" data-testid="inspector-branch">
+		<section aria-label={t("inspector.branch")} data-testid="inspector-branch">
 			{session.branch ? <BranchLine base={facts.base} branch={session.branch} /> : null}
 			{pullRequests}
-			{facts.uncommitted.length > 0 ? (
-				<GitStatusRow
-					additions={sum(facts.uncommitted, "additions")}
-					deletions={sum(facts.uncommitted, "deletions")}
-					icon={<Pencil aria-hidden="true" className="size-icon-sm shrink-0 text-muted-foreground" />}
-					label={t("inspector.git.uncommittedFiles", { count: facts.uncommitted.length })}
-					onClick={onOpenFiles}
-				/>
-			) : null}
-			{commitsRow ? (
-				<GitStatusRow
-					additions={sum(facts.committed, "additions")}
-					deletions={sum(facts.committed, "deletions")}
-					icon={<GitCommitHorizontal aria-hidden="true" className="size-icon-sm shrink-0 text-muted-foreground" />}
-					label={commitsRow.label}
-					note={commitsRow.note}
-					noteTone={commitsRow.noteTone}
-					onClick={onOpenFiles}
-				/>
-			) : null}
-			{action ? <div className="mt-2">{action}</div> : null}
-			{sendError ? (
-				<p className="mt-1.5 text-2xs leading-normal text-error" role="status">
-					{sendError}
-				</p>
-			) : null}
+			{/* The pull request section brings its own inset. Rows, the action and the
+			    error sit on the 12px content edge; the rows' hover fill bleeds to 6px. */}
+			<div className="flex flex-col px-3">
+				{facts.uncommitted.length > 0 ? (
+					<GitStatusRow
+						additions={sum(facts.uncommitted, "additions")}
+						deletions={sum(facts.uncommitted, "deletions")}
+						icon={<Pencil aria-hidden="true" className="size-icon-sm shrink-0 text-muted-foreground" />}
+						label={t("inspector.git.uncommittedFiles", { count: facts.uncommitted.length })}
+						onClick={onOpenFiles}
+					/>
+				) : null}
+				{commitsRow ? (
+					<GitStatusRow
+						additions={sum(facts.committed, "additions")}
+						deletions={sum(facts.committed, "deletions")}
+						icon={<GitCommitHorizontal aria-hidden="true" className="size-icon-sm shrink-0 text-muted-foreground" />}
+						label={commitsRow.label}
+						note={commitsRow.note}
+						noteTone={commitsRow.noteTone}
+						onClick={onOpenFiles}
+					/>
+				) : null}
+				{action ? <div className="mt-2">{action}</div> : null}
+				{sendError ? (
+					<p className="mt-1.5 text-2xs leading-normal text-error" role="status">
+						{sendError}
+					</p>
+				) : null}
+			</div>
 		</section>
 	);
 }
 
 function BranchLine({ base, branch }: { base?: string; branch: string }) {
 	return (
-		<div className="flex min-w-0 items-center gap-1.5 px-0.5 pb-2 font-mono text-xs text-muted-foreground">
+		<div className="flex min-w-0 items-center gap-1.5 px-3 pt-3 font-mono text-xs text-muted-foreground">
 			<GitBranch aria-hidden="true" className="size-icon-2xs shrink-0" />
 			<span className="min-w-0 truncate" title={branch}>
 				{branch}
@@ -209,7 +213,7 @@ function GitStatusRow({
 }) {
 	return (
 		<button
-			className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+			className="-mx-1.5 flex min-h-8 items-center gap-2 rounded-md px-1.5 text-left text-sm transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
 			onClick={onClick}
 			type="button"
 		>
