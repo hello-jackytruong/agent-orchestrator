@@ -551,7 +551,20 @@ func Run() error {
 		return errors.New("session manager lacks managed account boundaries")
 	}
 	providerAccounts := provideraccountsvc.New(store, client, guard, key, client.Endpoint(), uuid.NewString)
+	providerAccounts.SetNativeAccountSource(client)
 	providerLogin := provideraccountsvc.NewLoginCoordinator(providerAccounts, client, uuid.NewString)
+	agentSvc.SetManagedProviderReadiness(providerAccounts)
+	agentSvc.SetManagedProviderModels(providerAccounts)
+	providerAccounts.SetReadinessInvalidator(func(provider string) {
+		switch provider {
+		case "codex":
+			agentSvc.InvalidateAgentAuthentication(string(domain.HarnessCodex))
+			agentSvc.InvalidateModelCatalogs(string(domain.HarnessCodex))
+		case "claude":
+			agentSvc.InvalidateAgentAuthentication(string(domain.HarnessClaudeCode))
+			agentSvc.InvalidateModelCatalogs(string(domain.HarnessClaudeCode))
+		}
+	})
 	routing.SetProviderAccounts(providerAccounts)
 	sessionSvc.SetProviderAccounts(providerAccounts)
 

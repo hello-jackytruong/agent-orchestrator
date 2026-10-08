@@ -1054,7 +1054,7 @@
 	"settings.models.browse": "Browse",
 	"settings.models.custom": "Enter model ID…",
 	"settings.models.cantFind": "Can’t find your model?",
-	"settings.models.configureThenRefresh": "Configure the model in {{agent}}, then refresh.",
+	"settings.models.configureThenRefresh": "Configure the model in {{agent}}. It will appear automatically.",
 	"settings.models.currentDefaults": "Pinned models",
 	"settings.models.recent": "Recent",
 	"settings.models.loadFailed": "Could not load models.",

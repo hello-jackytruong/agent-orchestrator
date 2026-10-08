@@ -45,21 +45,16 @@ export function AgentModelPicker({
 		queryFn: () => revalidateAgentModels(agentId, projectId),
 		enabled: agentId !== "" && catalog?.refreshRecommended === true,
 		staleTime: Number.POSITIVE_INFINITY,
-		retry: false,
+		retry: 3,
+		retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 8_000),
+		refetchInterval: 15_000,
 	});
 	useEffect(() => {
 		if (revalidationQuery.data) {
 			queryClient.setQueryData(agentModelsQueryKey(agentId, projectId), revalidationQuery.data);
 		}
 	}, [agentId, projectId, queryClient, revalidationQuery.data]);
-	const warning =
-		(revalidationQuery.isError
-			? revalidationQuery.error instanceof Error
-				? revalidationQuery.error.message
-				: t("settings.models.validateFailed")
-			: undefined) ??
-		catalog?.warning ??
-		(query.isError ? (query.error instanceof Error ? query.error.message : t("settings.models.loadFailed")) : undefined);
+	const warning = query.isError && catalog === undefined ? t("settings.models.loadFailed") : undefined;
 	useEffect(() => {
 		onWarningChange(warning);
 	}, [onWarningChange, warning]);

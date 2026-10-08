@@ -400,7 +400,9 @@ export function TaskComposer({
 		queryFn: () => revalidateAgentModels(selectedAgent, modelsProjectId),
 		enabled: selectedAgent !== "" && modelCatalogQuery.data?.refreshRecommended === true,
 		staleTime: Number.POSITIVE_INFINITY,
-		retry: false,
+		retry: 3,
+		retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 8_000),
+		refetchInterval: 15_000,
 	});
 	useEffect(() => {
 		if (revalidationQuery.data) {
@@ -410,18 +412,9 @@ export function TaskComposer({
 			);
 		}
 	}, [modelsProjectId, queryClient, revalidationQuery.data, selectedAgent]);
-	const modelWarning =
-		(revalidationQuery.isError
-			? revalidationQuery.error instanceof Error
-				? revalidationQuery.error.message
-				: t("settings.models.validateFailed")
-			: undefined) ??
-		modelCatalogQuery.data?.warning ??
-		(modelCatalogQuery.isError
-			? modelCatalogQuery.error instanceof Error
-				? modelCatalogQuery.error.message
-				: t("settings.models.loadFailed")
-			: undefined);
+	const modelWarning = modelCatalogQuery.isError && modelCatalogQuery.data === undefined
+		? t("settings.models.loadFailed")
+		: undefined;
 	const modelCatalog: TaskComposerModelCatalog | undefined = modelCatalogQuery.data
 		? {
 				allowCustom: modelCatalogQuery.data.allowCustom,

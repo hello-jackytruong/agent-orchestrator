@@ -4164,6 +4164,7 @@ export interface components {
         ProviderAccountView: {
             displayName?: string;
             email: string;
+            global?: boolean;
             id: string;
             /** @enum {string} */
             kind?: "oauth" | "imported" | "api_key";

@@ -12330,6 +12330,8 @@ components:
           type: string
         email:
           type: string
+        global:
+          type: boolean
         id:
           type: string
         kind:

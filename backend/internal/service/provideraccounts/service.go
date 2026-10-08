@@ -19,15 +19,17 @@ import (
 
 // Service owns managed provider defaults, session assignments, and mutation recovery.
 type Service struct {
-	store      ports.ProviderAccountStore
-	proxy      ports.ProviderAccountProxy
-	guard      ports.ProviderAccountSessionGuard
-	gate       chan struct{}
-	ticketKey  []byte
-	endpoint   string
-	newID      func() string
-	usageMu    sync.Mutex
-	usageCache map[string]cachedUsage
+	store             ports.ProviderAccountStore
+	proxy             ports.ProviderAccountProxy
+	guard             ports.ProviderAccountSessionGuard
+	gate              chan struct{}
+	ticketKey         []byte
+	endpoint          string
+	newID             func() string
+	usageMu           sync.Mutex
+	usageCache        map[string]cachedUsage
+	native            ports.ProviderNativeAccountSource
+	onReadinessChange func(string)
 }
 
 type cachedUsage struct {
@@ -271,6 +273,80 @@ func Provider(h domain.AgentHarness) string {
 	}
 	return ""
 }
+
+// AuthenticationReadiness is the central auth result for AO-managed
+// providers. It deliberately reads only durable account facts; the helper
+// remains responsible for validating and refreshing the credentials.
+func (s *Service) AuthenticationReadiness(ctx context.Context, harness domain.AgentHarness, _ domain.AgentReadinessPurpose) (domain.AgentAuthenticationObservation, bool) {
+	provider := Provider(harness)
+	if provider == "" {
+		return domain.AgentAuthenticationObservation{}, false
+	}
+	attempted := time.Now().UTC()
+	state, _, err := s.store.LoadProviderAccountState(ctx)
+	if err != nil {
+		return domain.AgentAuthenticationObservation{
+			State: domain.AgentAuthenticationUnknown, Freshness: domain.AgentReadinessStale,
+			AttemptedAt: &attempted, ReasonCode: domain.AgentReadinessReasonAuthCheckFailed,
+			Reason: "Managed account status could not be read.",
+		}, true
+	}
+	if signedInCount(state, provider) > 0 {
+		return domain.AgentAuthenticationObservation{
+			State: domain.AgentAuthenticationAuthorized, Freshness: domain.AgentReadinessFresh,
+			CheckedAt: &attempted, AttemptedAt: &attempted, ReasonCode: domain.AgentReadinessReasonAuthorized,
+			Reason: "A managed account is signed in.",
+		}, true
+	}
+	return domain.AgentAuthenticationObservation{
+		State: domain.AgentAuthenticationUnauthorized, Freshness: domain.AgentReadinessFresh,
+		CheckedAt: &attempted, AttemptedAt: &attempted, ReasonCode: domain.AgentReadinessReasonUnauthorized,
+		Reason: "Sign in through Account Manager to use this provider.",
+	}, true
+}
+
+// DiscoverModels uses the account-scoped catalogue registered by CLIProxyAPI.
+// Cloud credential scopes deliberately return false so their existing
+// control-plane discovery remains authoritative.
+func (s *Service) DiscoverModels(ctx context.Context, harness domain.AgentHarness, scope string) (ports.AgentModelCatalog, bool, error) {
+	provider := Provider(harness)
+	if provider == "" || strings.HasPrefix(strings.TrimSpace(scope), "@cred:") {
+		return ports.AgentModelCatalog{}, false, nil
+	}
+	proxy, ok := s.proxy.(ports.ProviderAccountModelsProxy)
+	if !ok {
+		return ports.AgentModelCatalog{}, true, errors.New("managed model discovery is unavailable")
+	}
+	state, pending, err := s.store.LoadProviderAccountState(ctx)
+	if err != nil {
+		return ports.AgentModelCatalog{}, true, err
+	}
+	if pending != nil {
+		return ports.AgentModelCatalog{}, true, ports.ErrProviderAccountRecovery
+	}
+	id, found := primary(state, provider)
+	if !found || id == "" {
+		return ports.AgentModelCatalog{}, true, ports.ErrProviderLoginRequired
+	}
+	entry, found := account(state, id)
+	if !found || entry.Provider != provider {
+		return ports.AgentModelCatalog{}, true, ports.ErrProviderAccountUnknown
+	}
+	if entry.CredentialRef == "" || entry.AuthID == "" {
+		return ports.AgentModelCatalog{}, true, ports.ErrProviderLoginRequired
+	}
+	catalog, err := proxy.FetchAccountModels(ctx, provider, entry.AuthID)
+	if err != nil {
+		return ports.AgentModelCatalog{}, true, err
+	}
+	catalog.AgentID = string(harness)
+	return catalog, true, nil
+}
+
+// SetReadinessInvalidator keeps the shared readiness cache aligned with
+// account-manager login, logout, and native-account adoption changes.
+func (s *Service) SetReadinessInvalidator(invalidate func(string)) { s.onReadinessChange = invalidate }
+
 func (s *Service) lock(ctx context.Context) (func(), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -501,6 +577,12 @@ func (s *Service) reconcile(ctx context.Context, guarded bool) error {
 	if err != nil || pending == nil {
 		return err
 	}
+	// Also invalidate after recovery or a partial commit, not just a successful
+	// user action: durable authentication facts may already have changed.
+	if s.onReadinessChange != nil {
+		defer s.onReadinessChange("codex")
+		defer s.onReadinessChange("claude")
+	}
 	if pending.Next.Revision != state.Revision && pending.Next.Revision != state.Revision+1 {
 		return ports.ErrProviderAccountRecovery
 	}
@@ -584,6 +666,11 @@ func (s *Service) mutateWithBoundary(ctx context.Context, requestBoundary bool, 
 		return err
 	}
 	defer release()
+	return s.mutateLocked(ctx, requestBoundary, change)
+}
+
+// mutateLocked commits through the existing recovery journal with gate held.
+func (s *Service) mutateLocked(ctx context.Context, requestBoundary bool, change func(*domain.ProviderAccountState) (string, error)) error {
 	if err := s.reconcile(ctx, false); err != nil {
 		return err
 	}

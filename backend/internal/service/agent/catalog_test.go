@@ -151,6 +151,60 @@ type blockingSubsequentModelDiscoverer struct {
 	once    sync.Once
 }
 
+type managedModelSourceFake struct {
+	catalog ports.AgentModelCatalog
+	harness domain.AgentHarness
+	scope   string
+	calls   atomic.Int32
+}
+
+func (f *managedModelSourceFake) DiscoverModels(_ context.Context, harness domain.AgentHarness, scope string) (ports.AgentModelCatalog, bool, error) {
+	f.calls.Add(1)
+	f.harness, f.scope = harness, scope
+	return f.catalog, (harness == domain.HarnessCodex || harness == domain.HarnessClaudeCode) && !strings.HasPrefix(scope, "@cred:"), nil
+}
+
+func TestManagedModelDiscoveryUsesAccountCatalogueForLocalScopes(t *testing.T) {
+	cache := &fakeModelCache{}
+	native := successfulModelDiscoverer()
+	managed := &managedModelSourceFake{catalog: ports.AgentModelCatalog{
+		AgentID: "codex", Models: []ports.AgentModelInfo{{ID: "account-model", Label: "Account model"}},
+		SelectionMode: ports.ModelSelectionCatalog, Source: "cliproxy-account",
+	}}
+	svc := NewWithDeps(Deps{Cache: cache, Discoverer: native, Context: context.Background()})
+	svc.SetManagedProviderModels(managed)
+	got, err := svc.Models(context.Background(), "codex", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Models) != 1 || got.Models[0].ID != "account-model" || got.Source != "cliproxy-account" {
+		t.Fatalf("catalog = %+v, want the managed account catalogue", got)
+	}
+	if managed.calls.Load() != 1 || managed.harness != domain.HarnessCodex || managed.scope != "" {
+		t.Fatalf("managed discovery calls = %d harness=%q scope=%q", managed.calls.Load(), managed.harness, managed.scope)
+	}
+	if native.discoverCalls.Load() != 0 {
+		t.Fatalf("native discovery calls = %d, want 0", native.discoverCalls.Load())
+	}
+}
+
+func TestManagedModelDiscoveryLeavesCloudCredentialScopesAlone(t *testing.T) {
+	cache := &fakeModelCache{}
+	native := successfulModelDiscoverer()
+	managed := &managedModelSourceFake{catalog: ports.AgentModelCatalog{AgentID: "claude-code", Models: []ports.AgentModelInfo{{ID: "managed"}}}}
+	svc := NewWithDeps(Deps{Cache: cache, Discoverer: native, Context: context.Background()})
+	svc.SetManagedProviderModels(managed)
+	if _, err := svc.Models(context.Background(), "claude-code", "@cred:anthropic_api_key", true); err != nil {
+		t.Fatal(err)
+	}
+	if managed.calls.Load() != 1 {
+		t.Fatalf("managed discovery was not consulted for scope decision: %d", managed.calls.Load())
+	}
+	if native.discoverCalls.Load() != 1 {
+		t.Fatalf("native discovery calls = %d, want 1 for cloud scope", native.discoverCalls.Load())
+	}
+}
+
 func (f *fakeModelDiscoverer) Discover(ctx context.Context, request ports.AgentModelDiscoveryRequest) (ports.AgentModelCatalog, error) {
 	f.discoverCalls.Add(1)
 	active := f.active.Add(1)

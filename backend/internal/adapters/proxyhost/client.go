@@ -432,6 +432,53 @@ func (c *Client) FetchAccountUsage(ctx context.Context, provider, authID, creden
 	return usage, nil
 }
 
+// FetchAccountModels reads the model catalogue CLIProxyAPI registered for one
+// credential. It is deliberately a control-plane call: no session ticket or
+// provider token is exposed to AO.
+func (c *Client) FetchAccountModels(ctx context.Context, provider, authID string) (ports.AgentModelCatalog, error) {
+	if strings.TrimSpace(authID) == "" || (provider != "codex" && provider != "claude") {
+		return ports.AgentModelCatalog{}, errors.New("account is not signed in")
+	}
+	if err := c.Ensure(ctx); err != nil {
+		return ports.AgentModelCatalog{}, err
+	}
+	var response struct {
+		Provider string `json:"provider"`
+		Models   []struct {
+			ID          string `json:"id"`
+			Label       string `json:"label"`
+			Provider    string `json:"provider"`
+			Description string `json:"description"`
+			Default     bool   `json:"is_default"`
+		} `json:"models"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/ao/account-models", struct {
+		AuthID   string `json:"auth_id"`
+		Provider string `json:"provider"`
+	}{AuthID: authID, Provider: provider}, &response, nil); err != nil {
+		return ports.AgentModelCatalog{}, err
+	}
+	if response.Provider != provider || len(response.Models) == 0 {
+		return ports.AgentModelCatalog{}, errors.New("provider model catalogue is unavailable")
+	}
+	models := make([]ports.AgentModelInfo, 0, len(response.Models))
+	for _, model := range response.Models {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			continue
+		}
+		label := strings.TrimSpace(model.Label)
+		if label == "" {
+			label = id
+		}
+		models = append(models, ports.AgentModelInfo{ID: id, Label: label, Provider: strings.TrimSpace(model.Provider), IsDefault: model.Default})
+	}
+	if len(models) == 0 {
+		return ports.AgentModelCatalog{}, errors.New("provider model catalogue is unavailable")
+	}
+	return ports.AgentModelCatalog{AgentID: map[string]string{"codex": "codex", "claude": "claude-code"}[provider], SelectionMode: ports.ModelSelectionCatalog, Models: models, CustomModelEntry: ports.CustomModelEntryDirect, AllowCustom: true, Source: "cliproxy-account", FetchedAt: time.Now().UTC()}, nil
+}
+
 // DeleteCredential removes an upstream credential and verifies an already missing file.
 func (c *Client) DeleteCredential(ctx context.Context, name string) error {
 	if strings.HasPrefix(name, "config-index:") {

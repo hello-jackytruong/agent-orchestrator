@@ -279,7 +279,7 @@ describe("AgentModelCombobox", () => {
 		expect(screen.queryByText(/Use .* as a custom model/)).not.toBeInTheDocument();
 	});
 
-	it("explains how configured models become available and refreshes the catalog", async () => {
+	it("explains that configured models appear automatically", async () => {
 		const onRefresh = vi.fn();
 		renderCombobox([{ id: "configured/model", label: "Configured model" }], {
 			allowCustom: false,
@@ -290,43 +290,33 @@ describe("AgentModelCombobox", () => {
 
 		await userEvent.click(screen.getByRole("button", { name: "Worker model" }));
 		expect(screen.getByText("Can’t find your model?")).toBeInTheDocument();
-		expect(screen.getByText("Configure the model in OpenCode, then refresh.")).toBeInTheDocument();
-		await userEvent.click(screen.getByRole("button", { name: "Refresh models" }));
-		expect(onRefresh).toHaveBeenCalledOnce();
+		expect(screen.getByText("Configure the model in OpenCode. It will appear automatically.")).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /refresh|retry/i })).not.toBeInTheDocument();
+		expect(onRefresh).not.toHaveBeenCalled();
 	});
 
-	it("shows refresh only after a model search misses and prevents duplicate scope refreshes", async () => {
-		let finish!: () => void;
-		const onRefresh = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+	it("does not expose a manual refresh after a model search misses", async () => {
+		const onRefresh = vi.fn();
 		renderCombobox(Array.from({ length: 10 }, (_, index) => ({ id: `model-${index}`, label: `Model ${index}` })), {
 			onRefresh,
 		});
 		await userEvent.click(screen.getByRole("button", { name: "Worker model" }));
 		const search = screen.getByRole("searchbox", { name: "Search worker model" });
-		expect(screen.queryByRole("button", { name: "Refresh models" })).not.toBeInTheDocument();
 		await userEvent.type(search, "missing-model");
-		const refresh = screen.getByRole("button", { name: "Refresh models" });
-		expect(search.parentElement?.parentElement).toContainElement(refresh);
-		expect(screen.queryByText(/Last updated/)).not.toBeInTheDocument();
-		await userEvent.click(refresh);
-		const busy = screen.getByRole("button", { name: /Refreshing/ });
-		expect(busy).toBeDisabled();
-		await userEvent.click(busy);
-		expect(onRefresh).toHaveBeenCalledOnce();
-		finish();
-		await waitFor(() => expect(screen.getByRole("button", { name: "Refresh models" })).toBeEnabled());
+		expect(screen.queryByRole("button", { name: /refresh|retry/i })).not.toBeInTheDocument();
+		expect(onRefresh).not.toHaveBeenCalled();
 	});
 
-	it("shows refresh when the catalog is empty", async () => {
+	it("keeps an empty catalog free of manual refresh controls", async () => {
 		const onRefresh = vi.fn();
 		renderCombobox([], { allowCustom: false, onRefresh });
 
 		await userEvent.click(screen.getByRole("button", { name: "Worker model" }));
-		await userEvent.click(screen.getByRole("button", { name: "Refresh models" }));
-		expect(onRefresh).toHaveBeenCalledOnce();
+		expect(screen.queryByRole("button", { name: /refresh|retry/i })).not.toBeInTheDocument();
+		expect(onRefresh).not.toHaveBeenCalled();
 	});
 
-	it("shows a compact retryable persisted refresh error", async () => {
+	it("hides a persisted refresh error while keeping cached models usable", async () => {
 		const onRefresh = vi.fn();
 		renderCombobox([{ id: "cached", label: "Cached model" }], {
 			onRefresh,
@@ -334,10 +324,9 @@ describe("AgentModelCombobox", () => {
 			retryAt: "2026-09-07T09:30:00Z",
 		});
 		await userEvent.click(screen.getByRole("button", { name: "Worker model" }));
-		const retry = screen.getByRole("button", { name: /Retry refresh/ });
-		expect(retry).toHaveAttribute("title", "Provider temporarily unavailable");
-		await userEvent.click(retry);
-		expect(onRefresh).toHaveBeenCalledOnce();
+		expect(screen.queryByRole("button", { name: /refresh|retry/i })).not.toBeInTheDocument();
+		expect(screen.getByRole("menuitem", { name: "Cached model" })).toBeInTheDocument();
+		expect(onRefresh).not.toHaveBeenCalled();
 	});
 
 	it("does not display a retry time when no retry is scheduled", async () => {
@@ -346,7 +335,7 @@ describe("AgentModelCombobox", () => {
 			retryAt: null,
 		});
 		await userEvent.click(screen.getByRole("button", { name: "Worker model" }));
-		expect(screen.getByRole("button", { name: /Retry refresh/ })).not.toHaveTextContent("·");
+		expect(screen.queryByRole("button", { name: /refresh|retry/i })).not.toBeInTheDocument();
 	});
 
 	it("preserves a saved selection while a refreshed catalog no longer lists it", async () => {

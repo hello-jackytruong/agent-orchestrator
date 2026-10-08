@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
+	proxycore "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
@@ -142,6 +144,45 @@ func (b Boundary) Configure(engine *gin.Engine, h *handlers.BaseAPIHandler, _ *c
 		}
 		c.Data(http.StatusOK, "application/json", data)
 	})
+	engine.POST("/ao/account-models", func(c *gin.Context) {
+		var body struct {
+			AuthID   string `json:"auth_id"`
+			Provider string `json:"provider"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.AuthID) == "" || (body.Provider != "codex" && body.Provider != "claude") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid account models request"})
+			return
+		}
+		auth, ok := h.AuthManager.GetByID(strings.TrimSpace(body.AuthID))
+		if !ok || auth.Provider != body.Provider || auth.Disabled || auth.Status == coreauth.StatusDisabled {
+			c.JSON(http.StatusNotFound, gin.H{"error": "provider account not found"})
+			return
+		}
+		registered := proxycore.GlobalModelRegistry().GetModelsForClient(auth.ID)
+		if len(registered) == 0 {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider model catalogue is not ready"})
+			return
+		}
+		models := make([]map[string]any, 0, len(registered))
+		for i, model := range registered {
+			if model == nil || strings.TrimSpace(model.ID) == "" {
+				continue
+			}
+			label := strings.TrimSpace(model.DisplayName)
+			if label == "" {
+				label = model.ID
+			}
+			models = append(models, map[string]any{
+				"id": model.ID, "label": label, "provider": model.Type,
+				"description": model.Description, "is_default": i == 0,
+			})
+		}
+		if len(models) == 0 {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider model catalogue is not ready"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"provider": body.Provider, "models": models})
+	})
 	engine.POST("/ao/quota-events/ack", func(c *gin.Context) {
 		var body struct {
 			IDs []string `json:"ids"`
@@ -167,6 +208,14 @@ func (b Boundary) Configure(engine *gin.Engine, h *handlers.BaseAPIHandler, _ *c
 			loginID := c.Param("id")
 			if a.Metadata["ao_login_id"] == loginID || a.FileName == "ao-"+loginID+".json" {
 				email, _ := a.Metadata["email"].(string)
+				if email == "" && a.Provider == "claude" && strings.HasPrefix(loginID, "native-") {
+					var err error
+					email, err = nativeClaudeEmail(c.Request.Context(), h.AuthManager, a)
+					if err != nil {
+						c.AbortWithStatus(http.StatusBadGateway)
+						return
+					}
+				}
 				ref := a.FileName
 				if a.Attributes["api_key"] != "" {
 					ref = "config-index:" + a.Provider + ":" + a.EnsureIndex()
@@ -284,4 +333,41 @@ func (b Boundary) Configure(engine *gin.Engine, h *handlers.BaseAPIHandler, _ *c
 		}
 		c.JSON(http.StatusOK, b.Routes.Snapshot())
 	})
+}
+
+// Claude's native tokens have no embedded email. Ask the provider through
+// CLIProxy's authenticated request path; never guess identity from a stale
+// local profile or echo the provider's private response into AO.
+func nativeClaudeEmail(ctx context.Context, manager *coreauth.Manager, auth *coreauth.Auth) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	req, err := manager.NewHttpRequest(ctx, auth, http.MethodGet, "https://api.anthropic.com/api/oauth/profile", nil, http.Header{"Accept": {"application/json"}, "anthropic-beta": {"oauth-2025-04-20"}})
+	if err != nil {
+		return "", err
+	}
+	resp, err := manager.HttpRequest(ctx, auth, req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", errors.New("native profile is unavailable")
+	}
+	var profile struct {
+		Account struct {
+			Email        string `json:"email"`
+			EmailAddress string `json:"email_address"`
+		} `json:"account"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&profile); err != nil {
+		return "", errors.New("native profile is invalid")
+	}
+	email := strings.TrimSpace(profile.Account.Email)
+	if email == "" {
+		email = strings.TrimSpace(profile.Account.EmailAddress)
+	}
+	if email == "" {
+		return "", errors.New("native profile has no account identity")
+	}
+	return email, nil
 }

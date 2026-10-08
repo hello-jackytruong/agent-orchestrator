@@ -874,7 +874,7 @@ describe("ProjectSettingsForm", () => {
 		const workerModel = await screen.findByRole("button", { name: "Worker model" });
 		expect(screen.queryByRole("textbox", { name: "Worker model" })).not.toBeInTheDocument();
 		await userEvent.click(workerModel);
-		expect(screen.getByText("Configure the model in opencode, then refresh.")).toBeInTheDocument();
+		expect(screen.getByText("Configure the model in opencode. It will appear automatically.")).toBeInTheDocument();
 	});
 
 
@@ -1018,7 +1018,7 @@ describe("ProjectSettingsForm", () => {
 		});
 	});
 
-	it("shows a warning when background model revalidation fails", async () => {
+	it("keeps cached models usable when background revalidation fails", async () => {
 		getMock.mockImplementation(async (path: string) => {
 			if (path === "/api/v1/agents/readiness") return agentCatalogResponse;
 			if (path === "/api/v1/agents/{agent}/models") {
@@ -1060,8 +1060,8 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings("proj-1", undefined, "agents");
 
-		expect(await screen.findAllByText("model refresh unavailable")).toHaveLength(3);
-		expect(screen.getByRole("button", { name: "Worker model" })).toHaveTextContent("Select model");
+		expect(screen.queryByText("model refresh unavailable")).not.toBeInTheDocument();
+		expect(await screen.findByRole("button", { name: "Worker model" })).toHaveTextContent("Select model");
 	});
 
 	it("shows cached models immediately and deduplicates background revalidation", async () => {

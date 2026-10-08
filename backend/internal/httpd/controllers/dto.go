@@ -2776,6 +2776,7 @@ type ProviderAccountView struct {
 	DisplayName string                    `json:"displayName,omitempty"`
 	Email       string                    `json:"email"`
 	Kind        string                    `json:"kind,omitempty" enum:"oauth,imported,api_key"`
+	Global      bool                      `json:"global,omitempty"`
 	SignedIn    bool                      `json:"signedIn"`
 	Primary     bool                      `json:"primary"`
 	Sessions    []string                  `json:"sessions"`

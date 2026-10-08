@@ -773,7 +773,9 @@ function AgentModelField({
 		queryFn: () => revalidateAgentModels(agentId, projectId),
 		enabled: agentId !== "" && catalog?.refreshRecommended === true,
 		staleTime: Number.POSITIVE_INFINITY,
-		retry: false,
+		retry: 3,
+		retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 8_000),
+		refetchInterval: 15_000,
 	});
 	useEffect(() => {
 		if (revalidationQuery.data) {
@@ -782,10 +784,7 @@ function AgentModelField({
 	}, [agentId, projectId, queryClient, revalidationQuery.data]);
 	const isMode = catalog?.selectionMode === "mode";
 	const label = t(`settings.models.${role}${isMode ? "Mode" : "Model"}`);
-	const warning =
-		(revalidationQuery.isError ? (revalidationQuery.error instanceof Error ? revalidationQuery.error.message : t("settings.models.validateFailed")) : undefined) ??
-		catalog?.warning ??
-		(query.isError ? (query.error instanceof Error ? query.error.message : t("settings.models.loadFailed")) : undefined);
+	const warning = query.isError && catalog === undefined ? t("settings.models.loadFailed") : undefined;
 
 	if (agentId !== "" && query.isFetching && catalog === undefined) {
 		return (

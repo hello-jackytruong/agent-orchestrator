@@ -63,6 +63,12 @@ describe("provider account inventory", () => {
 		expect(mock.patch).toHaveBeenCalledWith("/api/v1/provider-accounts/{accountId}", { params: { path: { accountId: "a" } }, body: { displayName: "Work Codex" } });
 		await screen.findByText("Account name updated.");
 	});
+	it("shows when an account was discovered from the native provider login", async () => {
+		const native = { ...inventory, accounts: inventory.accounts.map(account => account.id === "a" ? { ...account, global: true } : account) };
+		mock.get.mockImplementation(async (path: string) => path === "/api/v1/provider-accounts" ? { data: native } : { data: { id: "login-1", provider: "codex", url: "https://provider.test/login", status: "waiting", accountId: "" } });
+		renderAccounts();
+		expect(await screen.findByText("Global")).toHaveAttribute("title", "Discovered from the provider's native login");
+	});
 	it("shows provider usage without changing account controls", async () => {
 		inventory.accounts[0].usage = { status: "available", plan: "Pro", windows: [{ name: "5 hour", remainingFraction: 0.75, resetTime: "2030-01-01T00:00:00Z" }] };
 		inventory.accounts[1].usage = { status: "unavailable", message: "Usage unavailable" };

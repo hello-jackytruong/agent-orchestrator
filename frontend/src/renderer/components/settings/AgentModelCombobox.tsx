@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Loader2, RefreshCw, Search } from "lucide-react";
+import { Check, ChevronDown, Search } from "lucide-react";
 import { type ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AgentModelCatalog } from "../../hooks/useAgentModelsQuery";
@@ -62,10 +62,6 @@ export function AgentModelCombobox({
 	allowCustom,
 	customModelEntry,
 	agentLabel,
-	onRefresh,
-	refreshing = false,
-	refreshError,
-	retryAt,
 	onChange,
 	onCustom,
 	emptyLabel,
@@ -138,8 +134,6 @@ export function AgentModelCombobox({
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [effortMenuOpen, setEffortMenuOpen] = useState(false);
 	const [awaitingEffort, setAwaitingEffort] = useState(false);
-	const [refreshFailed, setRefreshFailed] = useState(false);
-	const [refreshingLocal, setRefreshingLocal] = useState(false);
 	const [sessionRecentModels, setSessionRecentModels] = useState<Record<string, string[]>>({});
 	const recentKey = recentScope ?? "";
 	const storedRecentModels = useMemo(() => readRecentModels(recentScope), [recentScope]);
@@ -220,26 +214,14 @@ export function AgentModelCombobox({
 		setAwaitingEffort(openEffort);
 		if (!openEffort) setMenuOpen(false);
 	};
-	const refreshBusy = refreshing || refreshingLocal;
-	const showManualRefresh = Boolean(
-		onRefresh && (concreteModels.length === 0 || (normalizedSearch !== "" && rankedModels.length === 0)),
-	);
-	const runRefresh = () => {
-		if (!onRefresh || refreshBusy) return;
-		setRefreshFailed(false);
-		setRefreshingLocal(true);
-		void Promise.resolve(onRefresh()).catch(() => setRefreshFailed(true)).finally(() => setRefreshingLocal(false));
-	};
-
 	return (
 		<DropdownMenu
 			open={menuOpen}
-			onOpenChange={(open) => {
-				setMenuOpen(open);
-				if (!open) {
-					setSearch("");
-					setRefreshFailed(false);
-					setEffortMenuOpen(false);
+				onOpenChange={(open) => {
+					setMenuOpen(open);
+					if (!open) {
+						setSearch("");
+						setEffortMenuOpen(false);
 					setAwaitingEffort(false);
 				}
 			}}
@@ -272,65 +254,26 @@ export function AgentModelCombobox({
 				onCloseAutoFocus={onCloseAutoFocus}
 				className="settings-menu-surface max-h-select-menu-max! w-[min(22rem,calc(100vw-2rem))] overflow-hidden! rounded-(--radius-settings-panel) border-settings-menu bg-settings-menu"
 			>
-				{(showSearch || showManualRefresh) && (
+				{showSearch && (
 					<div className="flex shrink-0 items-center gap-1 p-1" onKeyDown={(event) => event.stopPropagation()}>
-						{showSearch && (
-							<div className="relative min-w-0 flex-1">
-								<Search
-									className="pointer-events-none absolute left-3.5 top-1/2 size-icon-sm -translate-y-1/2 text-settings-muted"
-									aria-hidden="true"
-								/>
-								<input
-									type="search"
-									aria-label={t("settings.models.searchAria", { label: ariaLabel.toLocaleLowerCase() })}
-									value={search}
-									onChange={(event) => setSearch(event.target.value)}
-									placeholder={t(
-										hasMultipleProviders
-											? "settings.models.searchModelsOrProvidersPlaceholder"
-											: "settings.models.searchPlaceholder",
-									)}
-									className="menu-search-input pl-8!"
-								/>
-							</div>
-						)}
-						{showManualRefresh && (
-							<button
-								type="button"
-								className="flex size-8 shrink-0 items-center justify-center rounded-md text-settings-muted hover:bg-settings-menu-selected hover:text-settings-label disabled:cursor-not-allowed disabled:opacity-50"
-								aria-label={refreshBusy ? t("settings.models.refreshing") : t("settings.models.refresh")}
-								disabled={refreshBusy}
-								onClick={(event) => {
-									event.stopPropagation();
-									runRefresh();
-								}}
-							>
-								{refreshBusy ? (
-									<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
-								) : (
-									<RefreshCw className="size-icon-sm" aria-hidden="true" />
+						<div className="relative min-w-0 flex-1">
+							<Search
+								className="pointer-events-none absolute left-3.5 top-1/2 size-icon-sm -translate-y-1/2 text-settings-muted"
+								aria-hidden="true"
+							/>
+							<input
+								type="search"
+								aria-label={t("settings.models.searchAria", { label: ariaLabel.toLocaleLowerCase() })}
+								value={search}
+								onChange={(event) => setSearch(event.target.value)}
+								placeholder={t(
+									hasMultipleProviders
+										? "settings.models.searchModelsOrProvidersPlaceholder"
+										: "settings.models.searchPlaceholder",
 								)}
-							</button>
-						)}
-					</div>
-				)}
-				{(refreshError || refreshFailed) && (
-					<div className="flex items-center gap-2 px-2 pb-1 text-xs text-settings-muted" aria-live="polite">
-						<button
-							type="button"
-							className="truncate text-warning underline underline-offset-2"
-							title={refreshError}
-							onClick={(event) => {
-								event.stopPropagation();
-								runRefresh();
-							}}
-							disabled={refreshBusy}
-						>
-							{t("settings.models.retry")}
-							{retryAt
-								? ` · ${new Date(retryAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-								: ""}
-						</button>
+								className="menu-search-input pl-8!"
+							/>
+						</div>
 					</div>
 				)}
 
@@ -403,19 +346,6 @@ export function AgentModelCombobox({
 												})
 											: t("settings.models.unavailable")}
 									</p>
-									{onRefresh && !refreshError && !showManualRefresh && (
-										<button
-											type="button"
-											className="text-settings-label underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-											onClick={(event) => {
-												event.stopPropagation();
-												runRefresh();
-											}}
-											disabled={refreshBusy}
-										>
-											{refreshBusy ? t("settings.models.refreshing") : t("settings.models.refresh")}
-										</button>
-									)}
 								</div>
 							</>
 						)}

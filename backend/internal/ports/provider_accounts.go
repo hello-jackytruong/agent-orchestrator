@@ -88,6 +88,13 @@ type ProviderAccountUsageProxy interface {
 	FetchAccountUsage(context.Context, string, string, string) (domain.ProviderAccountUsage, error)
 }
 
+// ProviderAccountModelsProxy reads the account-scoped model catalogue already
+// maintained by CLIProxyAPI. The account id is an opaque helper identity; raw
+// provider credentials never cross this boundary.
+type ProviderAccountModelsProxy interface {
+	FetchAccountModels(context.Context, string, string) (AgentModelCatalog, error)
+}
+
 // ProviderQuotaEvents is the optional helper capability used for automatic
 // primary recovery. Keeping it separate preserves compatibility with older
 // proxy fakes and helper protocol implementations.
@@ -107,6 +114,20 @@ type ProviderAccountRouting interface {
 	AssignAccount(context.Context, domain.SessionID, domain.AgentHarness, string) error
 	SessionAccount(context.Context, domain.SessionID) (domain.ProviderSessionRoute, bool, error)
 	LaunchAccountEnv(context.Context, domain.SessionID) (map[string]string, error)
+}
+
+// ManagedProviderReadiness supplies the authentication result for providers
+// whose credentials are owned by AO's account manager. Native harness checks
+// remain the fallback for every other provider.
+type ManagedProviderReadiness interface {
+	AuthenticationReadiness(context.Context, domain.AgentHarness, domain.AgentReadinessPurpose) (domain.AgentAuthenticationObservation, bool)
+}
+
+// ManagedProviderModelDiscovery supplies model catalogues for local providers
+// owned by Account Manager. The scope is passed so cloud credential catalogues
+// can continue using their existing control-plane path.
+type ManagedProviderModelDiscovery interface {
+	DiscoverModels(context.Context, domain.AgentHarness, string) (AgentModelCatalog, bool, error)
 }
 
 // ProviderLogin tracks one upstream login attempt, including private OAuth state.
@@ -138,6 +159,20 @@ type VerifiedProviderLogin struct {
 	Kind          string `json:"kind,omitempty"`
 	CredentialRef string `json:"credential_ref"`
 	AuthID        string `json:"auth_id"`
+}
+
+// NativeProviderCredential stays inside the daemon/helper boundary. Fingerprint
+// identifies a native login snapshot without storing its tokens in AO's database.
+type NativeProviderCredential struct {
+	Fingerprint    string
+	CredentialJSON string
+}
+
+// ProviderNativeAccountSource reads native logins without modifying them and
+// imports a new snapshot through CLIProxy's credential management API.
+type ProviderNativeAccountSource interface {
+	ReadNativeAccount(context.Context, string) (NativeProviderCredential, error)
+	ImportNativeAccount(context.Context, string, NativeProviderCredential) (VerifiedProviderLogin, error)
 }
 
 // ProviderAccountLoginProxy starts, verifies, and cancels upstream logins.

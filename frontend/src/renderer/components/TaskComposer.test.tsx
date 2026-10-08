@@ -1523,7 +1523,7 @@ describe("TaskComposer", () => {
 		expect(JSON.parse(window.localStorage.getItem("ao.taskComposer.preferences.v1") ?? "{}")["proj-1"].agents.codex.model).toBe("");
 	});
 
-	it("forwards model refresh metadata to the task picker", async () => {
+	it("keeps cached models usable without exposing refresh errors", async () => {
 		h.get.mockImplementation(async (path: string) => {
 			if (path.includes("/models")) {
 				return {
@@ -1548,7 +1548,8 @@ describe("TaskComposer", () => {
 		);
 
 		await userEvent.click(await screen.findByRole("button", { name: "Model" }));
-		expect(await screen.findByTitle("Provider temporarily unavailable")).toBeInTheDocument();
+		expect(screen.queryByTitle("Provider temporarily unavailable")).not.toBeInTheDocument();
+		expect(screen.getByRole("menuitem", { name: "GPT-5" })).toBeInTheDocument();
 	});
 
 	it("does not render free text when models must be configured in the agent", async () => {
@@ -1576,7 +1577,7 @@ describe("TaskComposer", () => {
 		const picker = await screen.findByRole("button", { name: "Model" });
 		expect(screen.queryByRole("textbox", { name: "Model" })).not.toBeInTheDocument();
 		await userEvent.click(picker);
-		expect(screen.getByText("Configure the model in opencode, then refresh.")).toBeInTheDocument();
+		expect(screen.getByText("Configure the model in opencode. It will appear automatically.")).toBeInTheDocument();
 	});
 
 	it("uses the project worker model as the new task model default", async () => {

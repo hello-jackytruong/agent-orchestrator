@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
+	proxycore "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
@@ -203,6 +204,37 @@ func TestTagAPIKeyAssociatesNativeCredentialWithLogin(t *testing.T) {
 		t.Fatalf("metadata=%v", auth.Metadata)
 	}
 }
+
+func TestAccountModelsReturnsOnlyTheRequestedCredentialCatalogue(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	if _, err := manager.Register(context.Background(), &coreauth.Auth{ID: "model-auth", Provider: "codex", Status: coreauth.StatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	registry := proxycore.GlobalModelRegistry()
+	registry.RegisterClient("model-auth", "codex", []*proxycore.ModelInfo{{ID: "account-gpt", DisplayName: "Account GPT", Type: "codex"}})
+	defer registry.UnregisterClient("model-auth")
+
+	routes := testRoutes(t)
+	engine := gin.New()
+	b := Boundary{Routes: routes, ControlKey: strings.Repeat("c", 32), InferenceKey: strings.Repeat("i", 32)}
+	b.Configure(engine, handlers.NewBaseAPIHandlers(&config.SDKConfig{}, manager), &config.Config{})
+	response := boundaryRequest(engine, http.MethodPost, "/ao/account-models", strings.Repeat("c", 32), `{"auth_id":"model-auth","provider":"codex"}`, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Models) != 1 || body.Models[0].ID != "account-gpt" {
+		t.Fatalf("models=%+v", body.Models)
+	}
+}
+
 func TestBoundaryDisablesAllInterfaceOAuthForwarder(t *testing.T) {
 	engine, _ := boundaryRouter(t)
 	w := boundaryRequest(engine, "GET", "/v8/management/oauth/auth-url?provider=codex&is_webui=true", strings.Repeat("c", 32), "", nil)

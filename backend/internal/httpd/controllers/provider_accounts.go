@@ -38,6 +38,10 @@ type providerAccountUsageReader interface {
 	AccountUsages(context.Context, []domain.ProviderAccount) map[string]domain.ProviderAccountUsage
 }
 
+type providerNativeRefresher interface {
+	RefreshNativeAccounts(context.Context) error
+}
+
 // ProviderLoginService defines login operations available to HTTP handlers.
 type ProviderLoginService interface {
 	Start(context.Context, string, string) (ports.ProviderLogin, error)
@@ -103,6 +107,11 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 	if !c.ready(w, r) {
 		return
 	}
+	if refresher, ok := c.Svc.(providerNativeRefresher); ok {
+		// Inventory remains readable during a locked keychain, provider outage,
+		// or a pending routing mutation. RecoveryRequired below exposes the latter.
+		_ = refresher.RefreshNativeAccounts(r.Context())
+	}
 	state, err := c.Svc.State(r.Context())
 	if err != nil {
 		envelope.WriteError(w, r, accountAPIError(err))
@@ -152,7 +161,7 @@ func (c *ProviderAccountsController) list(w http.ResponseWriter, r *http.Request
 		if displayName == "" {
 			displayName = domain.GeneratedProviderAccountName(a.Provider, a.ID)
 		}
-		view := ProviderAccountView{ID: a.ID, Provider: a.Provider, DisplayName: displayName, Email: a.Email, Kind: a.Kind, SignedIn: a.CredentialRef != "", Primary: primaries[a.Provider] == a.ID, Sessions: []string{}}
+		view := ProviderAccountView{ID: a.ID, Provider: a.Provider, DisplayName: displayName, Email: a.Email, Kind: a.Kind, Global: a.Global, SignedIn: a.CredentialRef != "", Primary: primaries[a.Provider] == a.ID, Sessions: []string{}}
 		if usage, ok := usageByAccount[a.ID]; ok {
 			view.Usage = providerAccountUsageView(usage)
 		}

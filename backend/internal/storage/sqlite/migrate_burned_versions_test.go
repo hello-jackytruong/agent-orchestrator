@@ -175,6 +175,9 @@ var shippedMigrations = map[int64]string{
 	169: "0169_reported_pr_cdc.sql",
 	170: "0170_review_result_notifications.sql",
 	173: "0173_provider_accounts.sql",
+	180: "0180_repair_agent_switch_failure_observability.sql",
+	181: "0181_repair_agent_switch_tables.sql",
+	182: "0182_repair_notification_source_key.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they

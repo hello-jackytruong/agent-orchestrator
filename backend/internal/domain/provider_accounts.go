@@ -9,11 +9,14 @@ import (
 // ProviderAccount is AO's safe identity plus a private upstream credential
 // reference. Empty CredentialRef is the durable signed-out fact.
 type ProviderAccount struct {
-	ID            string `json:"id"`
-	Provider      string `json:"provider"`
-	DisplayName   string `json:"display_name,omitempty"`
-	Email         string `json:"email"`
-	Kind          string `json:"kind,omitempty"`
+	ID          string `json:"id"`
+	Provider    string `json:"provider"`
+	DisplayName string `json:"display_name,omitempty"`
+	Email       string `json:"email"`
+	Kind        string `json:"kind,omitempty"`
+	// Global marks the account currently discovered from the provider's native
+	// login. It is informational; routing still follows the saved primary.
+	Global        bool   `json:"global,omitempty"`
 	CredentialRef string `json:"credential_ref"`
 	AuthID        string `json:"auth_id"`
 }
@@ -69,15 +72,23 @@ type ProviderSessionRoute struct {
 
 // ProviderAccountState contains only durable routing facts. A primary entry,
 // even when empty, records deliberate adoption of managed routing.
+// NativeProviderImport remembers an observed source even after local sign-out
+// or removal, so refresh cannot undo an explicit account-manager action.
+type NativeProviderImport struct {
+	Fingerprint string `json:"fingerprint"`
+	AccountID   string `json:"account_id"`
+}
+
 type ProviderAccountState struct {
-	Revision                int64                  `json:"revision"`
-	Accounts                []ProviderAccount      `json:"accounts"`
-	Primaries               []ProviderPrimary      `json:"primaries"`
-	Routes                  []ProviderSessionRoute `json:"routes"`
-	CodexQuotaAutoSwitch    bool                   `json:"codex_quota_auto_switch,omitempty"`
-	CodexPrimaryGeneration  int64                  `json:"codex_primary_generation,omitempty"`
-	ClaudeQuotaAutoSwitch   bool                   `json:"claude_quota_auto_switch,omitempty"`
-	ClaudePrimaryGeneration int64                  `json:"claude_primary_generation,omitempty"`
+	NativeImports           map[string]NativeProviderImport `json:"native_imports,omitempty"`
+	Revision                int64                           `json:"revision"`
+	Accounts                []ProviderAccount               `json:"accounts"`
+	Primaries               []ProviderPrimary               `json:"primaries"`
+	Routes                  []ProviderSessionRoute          `json:"routes"`
+	CodexQuotaAutoSwitch    bool                            `json:"codex_quota_auto_switch,omitempty"`
+	CodexPrimaryGeneration  int64                           `json:"codex_primary_generation,omitempty"`
+	ClaudeQuotaAutoSwitch   bool                            `json:"claude_quota_auto_switch,omitempty"`
+	ClaudePrimaryGeneration int64                           `json:"claude_primary_generation,omitempty"`
 }
 
 // ProviderAccountIntent survives a lost helper acknowledgement or daemon exit.

@@ -70,6 +70,9 @@ type modelCatalogCall struct {
 type Service struct {
 	agents            []agentregistry.HarnessAgent
 	readiness         *readinessCoordinator
+	managedMu         sync.RWMutex
+	managedReadiness  ports.ManagedProviderReadiness
+	managedModels     ports.ManagedProviderModelDiscovery
 	cache             ports.AgentModelCatalogCache
 	discoverer        ports.AgentModelDiscoverer
 	modelDiscoveryDir string
@@ -126,6 +129,7 @@ func NewWithDeps(deps Deps) *Service {
 	}
 	svc.readiness = newReadinessCoordinator(readinessCoordinatorConfig{
 		Agents: agents, Factory: agentregistry.Harnessed, Context: deps.Context, Logger: deps.Logger,
+		AuthenticationCheck: svc.managedAuthenticationCheck,
 	})
 	svc.sessions = deps.Sessions
 	if deps.Context != nil {
@@ -141,7 +145,7 @@ func NewWithDeps(deps Deps) *Service {
 // It is used by focused tests.
 func NewWithAgents(agents []agentregistry.HarnessAgent) *Service {
 	svc := newService(agents, nil, nil, nil)
-	svc.readiness = newReadinessCoordinator(readinessCoordinatorConfig{Agents: agents})
+	svc.readiness = newReadinessCoordinator(readinessCoordinatorConfig{Agents: agents, AuthenticationCheck: svc.managedAuthenticationCheck})
 	return svc
 }
 
@@ -151,6 +155,40 @@ func newService(agents []agentregistry.HarnessAgent, cache ports.AgentModelCatal
 		resolverMu[string(item.Harness)] = &sync.Mutex{}
 	}
 	return &Service{agents: agents, readiness: newReadinessCoordinator(readinessCoordinatorConfig{Agents: agents}), cache: cache, discoverer: discoverer, projects: projects, resolverMu: resolverMu, modelCalls: map[string]*modelCatalogCall{}, modelGeneration: map[string]int64{}, discoverySlots: make(chan struct{}, 2), ctx: context.Background(), now: time.Now, logger: slog.Default()}
+}
+
+// SetManagedProviderReadiness makes AO-managed providers use Account Manager
+// authentication in every readiness consumer. Other providers keep native
+// adapter checks.
+func (s *Service) SetManagedProviderReadiness(source ports.ManagedProviderReadiness) {
+	s.managedMu.Lock()
+	s.managedReadiness = source
+	s.managedMu.Unlock()
+	for _, agentID := range []string{string(domain.HarnessCodex), string(domain.HarnessClaudeCode)} {
+		s.InvalidateAgentAuthentication(agentID)
+	}
+}
+
+// SetManagedProviderModels makes local Codex and Claude catalogues come from
+// the selected Account Manager credential. Cloud credential scopes remain on
+// their existing discovery path.
+func (s *Service) SetManagedProviderModels(source ports.ManagedProviderModelDiscovery) {
+	s.managedMu.Lock()
+	s.managedModels = source
+	s.managedMu.Unlock()
+}
+
+func (s *Service) managedAuthenticationCheck(ctx context.Context, agentID string, purpose domain.AgentReadinessPurpose) (domain.AgentAuthenticationObservation, bool) {
+	if agentID != string(domain.HarnessCodex) && agentID != string(domain.HarnessClaudeCode) {
+		return domain.AgentAuthenticationObservation{}, false
+	}
+	s.managedMu.RLock()
+	source := s.managedReadiness
+	s.managedMu.RUnlock()
+	if source == nil {
+		return domain.AgentAuthenticationObservation{}, false
+	}
+	return source.AuthenticationReadiness(ctx, domain.AgentHarness(agentID), purpose)
 }
 
 // WarmModelCatalogs starts the bounded cache scheduler. Readiness is never held
@@ -660,7 +698,22 @@ func (s *Service) loadModels(ctx context.Context, agentID, projectID string, mod
 	if mode == modelLoadRefresh {
 		_ = s.persistCatalogState(ctx, cached, hasCached, "refreshing", "", time.Time{}, generation)
 	}
-	discovered, discoverErr := s.discoverer.Discover(ctx, request)
+	var discovered ports.AgentModelCatalog
+	var discoverErr error
+	s.managedMu.RLock()
+	managedModels := s.managedModels
+	s.managedMu.RUnlock()
+	if managedModels != nil {
+		var handled bool
+		discovered, handled, discoverErr = managedModels.DiscoverModels(ctx, domain.AgentHarness(agentID), projectID)
+		if handled {
+			// The managed source owns the error and its account-aware fallback.
+		} else {
+			discovered, discoverErr = s.discoverer.Discover(ctx, request)
+		}
+	} else {
+		discovered, discoverErr = s.discoverer.Discover(ctx, request)
+	}
 	discovered = applyCustomModelEntryPolicy(discovered, policy)
 	discovered.BinaryVersion = version
 	persistCtx := s.ctx
