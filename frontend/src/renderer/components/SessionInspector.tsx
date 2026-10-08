@@ -1999,7 +1999,6 @@ function LocalReviewsSection({
 				(pr.review?.unresolvedBy ?? []).some((reviewer) => reviewer.count > 0) ||
 				(pr.review?.resolvedBy ?? []).some((reviewer) => reviewer.count > 0)),
 	);
-	const openReviewStates = openReviewStatesFor(session, reviewStates);
 	const hasReviewerSession = (reviewsQuery.data?.reviewerHandleId ?? "").trim() !== "";
 	const reviewLive = reviewHasLiveActivity(
 		openReviewStates,

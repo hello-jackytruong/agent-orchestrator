@@ -4629,7 +4629,7 @@ describe("SessionInspector Cloud reviews", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: "Reviews" }));
     await userEvent.click(
-      await screen.findByRole("combobox", { name: /Select reviewer agent/ }),
+      await screen.findByRole("combobox", { name: "Reviewer agent" }),
     );
     await userEvent.click(
       await screen.findByRole("option", {
