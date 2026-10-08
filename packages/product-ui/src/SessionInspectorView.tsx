@@ -38,7 +38,7 @@ export type InspectorTab = {
 
 const inspectorShellClass = "@container/inspector flex h-full min-h-0 flex-col overflow-hidden";
 const inspectorBodyBaseClass = "min-h-0 flex-1";
-const inspectorScrollableBodyClass = "inspector-scrollbar overflow-x-hidden overflow-y-auto";
+const inspectorScrollableBodyClass = "inspector-scrollbar overflow-x-hidden overflow-y-auto pb-3";
 export const inspectorEmptyClass = "text-xs text-settings-muted leading-normal";
 /**
  * Positions each section header in the panel: top/left inset match; bottom is half of top so
@@ -63,7 +63,7 @@ export const inspectorSectionHeadingClass =
 export const inspectorReviewHeadingClass = inspectorSectionHeadingClass;
 
 const inspectorSectionHeaderShellClass =
-	"relative w-full min-w-0 rounded-lg text-nano font-normal normal-case leading-none tracking-normal text-muted-foreground";
+	"relative w-full min-w-0 rounded-lg text-xs font-normal normal-case leading-none tracking-normal text-muted-foreground";
 
 const inspectorSectionHeaderContentClass =
 	"relative z-[1] flex w-full min-w-0 items-center justify-between gap-2";
@@ -286,7 +286,9 @@ export function InspectorSection({
 						type="button"
 					>
 					<NavRowHighlight />
-					<span className={inspectorSectionHeaderContentClass}>
+					{/* The global `button { font: inherit }` rule outranks layered font
+					    utilities on the button itself, so the label size sits on this span. */}
+					<span className={cn(inspectorSectionHeaderContentClass, "text-xs")}>
 						<span className="min-w-0 flex-1">{title}</span>
 						{action ? (
 							// Keep section actions clickable without toggling the accordion.
