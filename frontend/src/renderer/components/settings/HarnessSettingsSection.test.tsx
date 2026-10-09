@@ -427,7 +427,7 @@ describe("HarnessSettingsSection", () => {
 		expect(openExternal).toHaveBeenCalledWith("https://example.test/login");
 	});
 
-	it("classifies an unauthorized Unreal Agent as needing setup and opens its guide", async () => {
+	it("classifies an unauthorized Unreal Agent as not configured and offers documentation", async () => {
 		const unrealCatalog = { agents: [agentReadiness("unreal-agent", "Unreal Agent", { authentication: "unauthorized" })] };
 		const documentationUrl = "https://github.com/Untrivial-ai/agent-orchestrator/blob/main/docs/harnesses/unreal-agent.md";
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
@@ -445,12 +445,12 @@ describe("HarnessSettingsSection", () => {
 		renderSection();
 		const row = (await screen.findByText("Unreal Agent")).closest('[data-agent="unreal-agent"]') as HTMLElement;
 		expect(await within(row).findByText("Not set up")).toBeInTheDocument();
-		const setup = within(row).getByRole("button", { name: "Set up" });
-		await userEvent.click(setup);
+		const documentation = within(row).getByRole("button", { name: "View documentation" });
+		await userEvent.click(documentation);
 		expect(openExternal).toHaveBeenCalledWith(documentationUrl);
 	});
 
-	it("keeps Unreal setup available when credentials are configured but unverified", async () => {
+	it("keeps Unreal documentation available when credentials are configured but unverified", async () => {
 		const unrealCatalog = { agents: [agentReadiness("unreal-agent", "Unreal Agent", { authentication: "configured" })] };
 		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/readiness") return { data: unrealCatalog } as never;
@@ -466,7 +466,7 @@ describe("HarnessSettingsSection", () => {
 		renderSection();
 		const row = (await screen.findByText("Unreal Agent")).closest('[data-agent="unreal-agent"]') as HTMLElement;
 		expect(await within(row).findByText("Configured")).toBeInTheDocument();
-		expect(within(row).getByRole("button", { name: "Set up" })).toBeEnabled();
+		expect(within(row).getByRole("button", { name: "View documentation" })).toBeEnabled();
 	});
 
 	it("shows cached readiness while silently refreshing when the page opens", async () => {
