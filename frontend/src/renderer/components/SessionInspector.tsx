@@ -535,9 +535,9 @@ function InspectorPolicyRow({
 	onCheckedChange: (checked: boolean) => void;
 }) {
 	return (
-		<div className={cn("flex items-center justify-between gap-3 py-1", className)} data-slot="inspector-policy-row">
+		<div className={cn("flex min-h-8 items-center justify-between gap-3 py-1", className)} data-slot="inspector-policy-row">
 			<div className="flex min-w-0 items-center gap-1.5">
-				<label className="min-w-0 text-xs font-normal text-settings-label" htmlFor={id}>
+				<label className="min-w-0 text-sm font-normal text-settings-label" htmlFor={id}>
 					{label}
 				</label>
 				{description ? (
@@ -594,7 +594,7 @@ function LinkedPRCard({ external, pr }: { external: boolean; pr: SessionPRRefere
 				<CopyButton compact label={t("link.copy")} text={pr.url} />
 			</div>
 			<div className="mt-1.5 flex items-center justify-between gap-2">
-				<div className="flex min-w-0 items-center gap-1 text-2xs text-settings-muted">
+				<div className="flex min-w-0 items-center gap-1 text-xs text-settings-muted">
 					<span>{t("inspector.reportedByWorker")}</span>
 					<Tooltip>
 						<TooltipTrigger asChild>
@@ -622,7 +622,7 @@ function UsageCostTelemetry({ usage }: { usage: SessionUsage }) {
 		<div>
 			<div className="grid grid-cols-2 gap-4">
 				<div className="min-w-0">
-					<p className="text-2xs text-settings-muted">{t("inspector.usage.processedTokens")}</p>
+					<p className="text-xs text-settings-muted">{t("inspector.usage.processedTokens")}</p>
 					<p
 						aria-label={
 							processedTokens === null
@@ -637,7 +637,7 @@ function UsageCostTelemetry({ usage }: { usage: SessionUsage }) {
 				</div>
 				<div className="min-w-0 text-right">
 					<div className="flex items-center justify-end gap-1">
-						<p className="text-2xs text-settings-muted">{t("inspector.usage.estimatedCost")}</p>
+						<p className="text-xs text-settings-muted">{t("inspector.usage.estimatedCost")}</p>
 						<EstimatedCostInfo cost={usage.totals.estimatedCost} />
 					</div>
 					<p className="mt-0.5 truncate font-mono text-sm-md font-medium text-settings-label">
@@ -660,7 +660,7 @@ function UsageCostTelemetry({ usage }: { usage: SessionUsage }) {
 			) : usage.harnesses.length > 1 ? (
 				<div className="mt-2 border-t border-(--color-border-settings-input) pt-1.5">
 					<div
-						className={`grid ${usageRowColumns(showsAgentCost)} items-center gap-2 px-1 pb-0.5 text-2xs text-settings-muted`}
+						className={`grid ${usageRowColumns(showsAgentCost)} items-center gap-2 px-1 pb-0.5 text-xs text-settings-muted`}
 					>
 						<span>{t("inspector.usage.agent")}</span>
 						<span className="text-right">{t("inspector.usage.tokens")}</span>
@@ -695,13 +695,13 @@ function UsageAgentAttribution({ harness }: { harness: SessionUsage["harnesses"]
 	const attribution = (
 		<>
 			<AgentAvatar className="size-4" decorative provider={harness.harness} />
-			<span className="shrink-0 text-sm-md text-settings-label">{harnessName}</span>
+			<span className="shrink-0 text-sm text-settings-label">{harnessName}</span>
 			{modelSummary ? (
 				<>
 					<span aria-hidden="true" className="text-settings-muted">
 						·
 					</span>
-					<span className="truncate text-2xs text-settings-muted" title={modelSummaryTitle ?? undefined}>
+					<span className="truncate text-xs text-settings-muted" title={modelSummaryTitle ?? undefined}>
 						{modelSummary}
 					</span>
 				</>
@@ -801,7 +801,7 @@ function AutoInjectCIPolicyControl({ session, hostId }: { session: WorkspaceSess
 				tooltipClassName="max-w-64"
 			/>
 			{error ? (
-				<p className="mt-1 text-2xs leading-normal text-error" role="status">
+				<p className="mt-1 text-xs leading-normal text-error" role="status">
 					{error}
 				</p>
 			) : null}
@@ -824,7 +824,7 @@ function UsageProviderRow({
 			detailsLabel={t("inspector.usage.providerDetails", { name: harnessName })}
 			icon={<AgentAvatar className="size-4" decorative provider={harness.harness} />}
 			name={harnessName}
-			nameClassName="text-sm-md"
+			nameClassName="text-sm"
 			regionLabel={t("inspector.usage.providerPeek", { name: harnessName })}
 			showCost={showCost}
 			totals={harness.totals}
@@ -849,7 +849,7 @@ function ProviderUsageDetails({ harness }: { harness: SessionUsage["harnesses"][
 					/>
 				))
 			) : (
-				<p className="px-1 py-1 text-2xs text-settings-muted">{t("inspector.usage.noModelTelemetry")}</p>
+				<p className="px-1 py-1 text-xs text-settings-muted">{t("inspector.usage.noModelTelemetry")}</p>
 			)}
 		</div>
 	);
@@ -901,7 +901,7 @@ function AutoInjectReviewPolicyControl({ session, hostId }: { session: Workspace
 				tooltipClassName="max-w-60"
 			/>
 			{error ? (
-				<p className="mt-1 text-2xs leading-normal text-error" role="status">
+				<p className="mt-1 text-xs leading-normal text-error" role="status">
 					{error}
 				</p>
 			) : null}
@@ -936,7 +936,7 @@ function UsageModelRow({
 		<UsageDisclosureRow
 			detailsLabel={t("inspector.usage.modelDetails", { name: modelName })}
 			name={modelName}
-			nameClassName="text-2xs"
+			nameClassName="text-xs"
 			nameTitle={model.modelId}
 			regionLabel={t("inspector.usage.modelPeek", { name: modelName })}
 			showCost={showCost}
@@ -1001,7 +1001,7 @@ function UsageDisclosureRow({
 					<span className="truncate" title={nameTitle}>{name}</span>
 				</span>
 				<span
-					className="text-right font-mono text-2xs text-settings-label"
+					className="text-right font-mono text-xs text-settings-label"
 					title={processedTokens === null ? undefined : t("inspector.usage.processedTokensAria", { count: exactProcessed })}
 				>
 					{processedTokens === null ? "—" : formatTelemetryTokenValue(processedTokens)}
@@ -1031,7 +1031,7 @@ function UsageCostValue({ cost }: { cost: EstimatedCost | null }) {
 	const value = formatEstimatedCost(cost);
 	const label = value ?? t("inspector.usage.metricUnavailable", { label: t("inspector.usage.cost") });
 	return (
-		<span aria-label={label} className="text-right font-mono text-2xs text-settings-label" title={label}>
+		<span aria-label={label} className="text-right font-mono text-xs text-settings-label" title={label}>
 			{value ?? t("usage.unavailable")}
 		</span>
 	);
@@ -1097,7 +1097,7 @@ function UsageRateMetric({ rate }: { rate: string | null }) {
 			: t("inspector.usage.cacheHitRateDescription", { rate });
 	return (
 		<div className="min-w-0">
-			<dt className="truncate text-2xs text-settings-muted">{label}</dt>
+			<dt className="truncate text-xs text-settings-muted">{label}</dt>
 			<dd
 				aria-label={description}
 				className="mt-0.5 truncate font-mono text-sm-md text-settings-label"
@@ -1119,7 +1119,7 @@ function UsageMetric({ label, metric }: { label: string; metric: number | null |
 			: t("inspector.usage.metricAria", { label, count: exactValue });
 	return (
 		<div className="min-w-0">
-			<dt className="truncate text-2xs text-settings-muted">{label}</dt>
+			<dt className="truncate text-xs text-settings-muted">{label}</dt>
 			<dd
 				aria-label={accessibleLabel}
 				className="mt-0.5 truncate font-mono text-sm-md text-settings-label"
@@ -1295,7 +1295,7 @@ function SessionControls({ session, hostId }: { session: WorkspaceSession; hostI
 
 	const terminateAction = (
 		<div className="flex items-center justify-between gap-3 py-1">
-			<span className="min-w-0 text-xs font-medium text-settings-label">{t("inspector.archiveShort")}</span>
+			<span className="min-w-0 text-sm font-normal text-settings-label">{t("inspector.archiveShort")}</span>
 			<Tooltip>
 				<TooltipTrigger asChild>
 					<span className="inline-flex">
@@ -1353,7 +1353,7 @@ function SessionControls({ session, hostId }: { session: WorkspaceSession; hostI
 						tooltipClassName="max-w-60"
 					/>
 					{policyError ? (
-						<p className="mt-1 text-2xs leading-normal text-error" role="status">
+						<p className="mt-1 text-xs leading-normal text-error" role="status">
 							{policyError}
 						</p>
 					) : null}
@@ -1424,8 +1424,9 @@ function PRSummaryCard({
 		href: prBrowserUrl(pr),
 		stateLabel: t(prStateLabelKeys[pr.state]),
 		reviewDetailsAction: canOpenReviews && pr.review.decision !== "none" ? (
-			<button className="whitespace-nowrap text-2xs text-settings-muted underline-offset-2 hover:underline" onClick={onOpenReviews} type="button">
-				{t("pr.review.viewDetails")} ↗
+			<button className="whitespace-nowrap text-settings-muted underline-offset-2 hover:underline" onClick={onOpenReviews} type="button">
+				{/* The global `button { font: inherit }` rule outranks a size on the button itself. */}
+				<span className="text-xs">{t("pr.review.viewDetails")} ↗</span>
 			</button>
 		) : undefined,
 	};
@@ -1522,7 +1523,7 @@ function ArtifactSummaryCard({
 		onOpenArtifact?.({ path: artifact.path });
 	};
 	return (
-		<div className="flex w-full min-w-0 items-center rounded-md border border-(--color-border-settings-input) text-xs transition-colors hover:bg-interactive-hover focus-within:bg-interactive-hover focus-within:ring-1 focus-within:ring-ring">
+		<div className="flex w-full min-w-0 items-center rounded-md border border-(--color-border-settings-input) text-sm transition-colors hover:bg-interactive-hover focus-within:bg-interactive-hover focus-within:ring-1 focus-within:ring-ring">
 			<button
 				className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left outline-none"
 				onClick={handleOpen}
@@ -2943,12 +2944,12 @@ function ReviewPanel({
 			{/* Notices and the control rows are separate groups: 12px between them. */}
 			<div className="flex min-w-0 flex-col gap-3">
 					{error ? (
-						<p className="m-0 rounded-md border border-error/28 bg-error/8 px-2.5 py-2 text-sm-md leading-normal text-error">
+						<p className="m-0 rounded-md border border-error/28 bg-error/8 px-2.5 py-2 text-xs leading-normal text-error">
 							{apiErrorMessage(error, t("inspector.reviewRequestFailed"))}
 					</p>
 				) : null}
 				{autoReviewFailure ? (
-					<p className="m-0 rounded-md border border-error/28 bg-error/8 px-2.5 py-2 text-sm-md leading-normal text-error" role="status">
+					<p className="m-0 rounded-md border border-error/28 bg-error/8 px-2.5 py-2 text-xs leading-normal text-error" role="status">
 						<span className="font-semibold">
 							{t("inspector.autoReview")} {t("inspector.review.failed")}:
 						</span>{" "}
@@ -2964,7 +2965,7 @@ function ReviewPanel({
 								type="button"
 							>
 								<Info aria-hidden="true" className="mt-px size-icon-2xs shrink-0" />
-								<span className="min-w-0">{t("inspector.reviewAlreadyRanShort")}</span>
+								<span className="min-w-0 text-xs">{t("inspector.reviewAlreadyRanShort")}</span>
 							</button>
 						</TooltipTrigger>
 						<TooltipContent className="max-w-56 leading-normal">{notice}</TooltipContent>
@@ -2976,7 +2977,7 @@ function ReviewPanel({
 				<div className="review-run-controls-container flex min-w-0 flex-col text-xs">
 					{cloud ? (
 						<div className="flex items-center justify-between gap-3 py-1">
-							<span className="min-w-0 text-xs font-normal text-settings-label">{t("inspector.selectReviewerAgent")}</span>
+							<span className="min-w-0 text-sm font-normal text-settings-label">{t("inspector.selectReviewerAgent")}</span>
 							<div className="flex min-w-0 items-center justify-end gap-1.5">
 								<Select
 									disabled={reviewRunning || isTriggering || isCancelling || isInstallingCloudHarness}
@@ -3016,7 +3017,7 @@ function ReviewPanel({
 						</div>
 					) : (
 					<div className="flex items-center justify-between gap-3 py-1">
-						<span className="min-w-0 text-xs font-normal text-settings-label">
+						<span className="min-w-0 text-sm font-normal text-settings-label">
 							{t("inspector.selectReviewerAgent")}
 						</span>
 						<ReviewerSelect
@@ -3043,7 +3044,7 @@ function ReviewPanel({
 					{activeReviewers.some((surface) => surface.reviewId !== reviewerSurface?.reviewId)
 						? activeReviewers.map((surface) => (
 								<div className="flex items-center justify-between gap-3 py-1" key={surface.reviewId}>
-									<span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground">
+									<span className="flex min-w-0 items-center gap-1.5 text-sm font-normal text-foreground">
 										<AgentAvatar className="size-4" decorative provider={surface.harness} />
 										<span className="truncate">{agentLabel(surface.harness)}</span>
 									</span>
@@ -3073,7 +3074,7 @@ function ReviewPanel({
 					    from nowhere else, so the row comes back for as long as it runs. */}
 					{autoReviewEnabled && !reviewRunning ? null : (
 						<div className="flex items-center justify-between gap-3 py-1">
-							<span className="text-xs font-normal text-settings-label">{t("inspector.review.session")}</span>
+							<span className="text-sm font-normal text-settings-label">{t("inspector.review.session")}</span>
 							<div className="flex min-w-0 items-center justify-end gap-1.5">
 								<Button
 									aria-label={primaryReviewActionLabel}

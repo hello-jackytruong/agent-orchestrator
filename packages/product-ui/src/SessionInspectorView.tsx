@@ -47,8 +47,8 @@ export const inspectorEmptyClass = "text-xs text-settings-muted leading-normal";
  */
 export const inspectorSectionHeaderSlotClass = "px-1.5 py-0.5";
 
-/** Inset inside the hover pill; with the 12px label it makes a 28px hit target. */
-export const inspectorSectionHeaderInsetClass = "px-1.5 py-2";
+/** Inset inside the hover pill; with the 14px label (20px line) it makes a 32px hit target. */
+export const inspectorSectionHeaderInsetClass = "px-1.5 py-1.5";
 
 /**
  * Body inset matches header label (panel px-1.5 + header button px-1.5). The vertical padding
@@ -66,7 +66,7 @@ export const inspectorSectionHeadingClass =
 export const inspectorReviewHeadingClass = inspectorSectionHeadingClass;
 
 const inspectorSectionHeaderShellClass =
-	"relative w-full min-w-0 rounded-lg text-xs font-normal normal-case leading-none tracking-normal text-muted-foreground";
+	"relative w-full min-w-0 rounded-lg text-sm font-normal normal-case leading-none tracking-normal text-muted-foreground";
 
 const inspectorSectionHeaderContentClass =
 	"relative z-[1] flex w-full min-w-0 items-center justify-between gap-2";
@@ -291,7 +291,7 @@ export function InspectorSection({
 					<NavRowHighlight />
 					{/* The global `button { font: inherit }` rule outranks layered font
 					    utilities on the button itself, so the label size sits on this span. */}
-					<span className={cn(inspectorSectionHeaderContentClass, "text-xs")}>
+					<span className={cn(inspectorSectionHeaderContentClass, "text-sm")}>
 						<span className="min-w-0 flex-1">{title}</span>
 						{action ? (
 							// Keep section actions clickable without toggling the accordion.
@@ -516,7 +516,7 @@ export function InspectorPullRequestCardView({
 					/>
 					{statusNotice}
 					{mergeError ? (
-						<p className="mt-2 text-2xs leading-normal text-error" role="status">
+						<p className="mt-2 text-xs leading-normal text-error" role="status">
 							{mergeError}
 						</p>
 					) : null}
@@ -557,9 +557,9 @@ export function InspectorActivityTimelineView({ events }: { events: InspectorTim
 						)}
 						style={event.markerTone ? { background: event.markerTone } : undefined}
 					/>
-					<div className="min-w-0 flex-1 truncate text-control text-foreground [&_b]:font-semibold">{event.content}</div>
+					<div className="min-w-0 flex-1 truncate text-sm text-foreground [&_b]:font-semibold">{event.content}</div>
 					{event.timestamp ? (
-						<span className="shrink-0 font-mono text-caption tabular-nums text-passive">{event.timestamp}</span>
+						<span className="shrink-0 font-mono text-xs tabular-nums text-passive">{event.timestamp}</span>
 					) : null}
 				</div>
 			))}
@@ -738,7 +738,7 @@ export function InspectorReviewsView({
 						data-testid="review-live-card"
 					>
 						<LoaderCircleIcon aria-hidden="true" className="size-icon-sm shrink-0 animate-spin text-muted-foreground" />
-						<span className="min-w-0 flex-1 text-xs font-medium leading-snug text-muted-foreground">{liveReviewLabel}</span>
+						<span className="min-w-0 flex-1 text-sm leading-snug text-muted-foreground">{liveReviewLabel}</span>
 					</article>
 				) : null}
 				{groups.map((group) => (
@@ -830,7 +830,7 @@ function ReviewSourceLabel({
 			<span className="flex shrink-0 items-center justify-center text-passive [&_svg]:size-icon-xs">
 				{icon}
 			</span>
-			<span className="shrink-0 text-2xs font-normal normal-case text-passive">
+			<span className="shrink-0 text-xs font-normal normal-case text-passive">
 				{children}
 			</span>
 			{marker ? (
@@ -875,14 +875,14 @@ function ReviewDisclosure({
 				<div className="flex min-w-0 flex-col gap-1 border-b border-border/70 px-3 py-2.5">
 					<span className="flex min-w-0 items-start justify-between gap-2 @max-[420px]/inspector:flex-col @max-[420px]/inspector:items-stretch">
 						<span
-							className="min-w-0 whitespace-normal break-words text-xs font-normal leading-snug text-foreground"
+							className="min-w-0 whitespace-normal break-words text-sm font-normal leading-snug text-foreground"
 							title={title}
 						>
 							{title}
 						</span>
 						{verdict ? <VerdictBadge className="@max-[420px]/inspector:self-start" verdict={verdict} /> : null}
 					</span>
-					<span className="whitespace-normal break-words font-mono text-micro leading-snug text-passive" title={meta}>
+					<span className="whitespace-normal break-words font-mono text-xs leading-snug text-passive" title={meta}>
 						{meta}
 					</span>
 				</div>
@@ -907,10 +907,10 @@ function ReviewDisclosure({
 				>
 					<ChevronIcon className="size-icon-sm shrink-0 text-passive" direction={open ? "down" : "right"} />
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<span className="whitespace-normal break-words text-xs font-normal leading-snug text-foreground" title={title}>
+						<span className="whitespace-normal break-words text-sm font-normal leading-snug text-foreground" title={title}>
 							{title}
 						</span>
-						<span className="whitespace-normal break-words font-mono text-micro leading-snug text-passive" title={meta}>
+						<span className="whitespace-normal break-words font-mono text-xs leading-snug text-passive" title={meta}>
 							{meta}
 						</span>
 					</span>
@@ -1171,11 +1171,11 @@ function ExternalReviewCard({
 				name={entry.reviewerId}
 			/>
 			<span className="flex min-w-0 flex-col gap-0.5">
-				<span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground">
+				<span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-foreground">
 					<span className="min-w-0 break-words">{entry.reviewerId}</span>
-					{entry.isBot ? <span className="shrink-0 font-mono text-micro text-passive">{labels.bot}</span> : null}
+					{entry.isBot ? <span className="shrink-0 font-mono text-xs text-passive">{labels.bot}</span> : null}
 				</span>
-				{entry.submittedAtLabel ? <span className="font-mono text-micro text-passive">{labels.reviewedAt(entry.submittedAtLabel)}</span> : null}
+				{entry.submittedAtLabel ? <span className="font-mono text-xs text-passive">{labels.reviewedAt(entry.submittedAtLabel)}</span> : null}
 			</span>
 			<span className={cn("flex shrink-0 items-center gap-2 whitespace-nowrap pr-1 text-2xs font-medium @max-[420px]/inspector:col-start-2 @max-[420px]/inspector:row-start-2 @max-[420px]/inspector:justify-self-start", reviewerVerdictTone[entry.verdict.tone])}>
 				<span>{entry.verdict.label}</span>
@@ -1425,7 +1425,7 @@ function InlineCommentRow({
 				} : undefined}
 			>
 				<span className="flex min-w-0 items-start gap-2">
-					<span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-2xs font-semibold text-foreground">
+					<span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-xs font-semibold text-foreground">
 						{canExpand ? <ChevronIcon className="size-icon-2xs shrink-0 text-passive" direction={expanded ? "down" : "right"} /> : null}
 						<span className="truncate" title={fileLabel}>{fileLabel}</span>
 					</span>
@@ -1451,11 +1451,11 @@ function InlineCommentRow({
 						) : null}
 					</span>
 				</span>
-				{body ? <span data-overflow-axis="horizontal" ref={previewRef} className={cn("mt-1 block min-w-0 text-2xs leading-relaxed text-muted-foreground", expanded ? "whitespace-pre-wrap break-words" : "truncate")}>{expanded ? body : preview}</span> : null}
+				{body ? <span data-overflow-axis="horizontal" ref={previewRef} className={cn("mt-1 block min-w-0 text-xs leading-relaxed text-muted-foreground", expanded ? "whitespace-pre-wrap break-words" : "truncate")}>{expanded ? body : preview}</span> : null}
 			</div>
-			{resolvedSuccess ? <p className="m-0 text-2xs font-medium text-success">{labels.resolvedReview}</p> : null}
-			{resolveError ? <p className="m-0 text-2xs font-medium text-error">{labels.resolveReviewFailed}</p> : null}
-			{sendError && !sent ? <p className="m-0 text-2xs font-medium text-error">{labels.sendToWorkerAgentError}</p> : null}
+			{resolvedSuccess ? <p className="m-0 text-xs font-medium text-success">{labels.resolvedReview}</p> : null}
+			{resolveError ? <p className="m-0 text-xs font-medium text-error">{labels.resolveReviewFailed}</p> : null}
+			{sendError && !sent ? <p className="m-0 text-xs font-medium text-error">{labels.sendToWorkerAgentError}</p> : null}
 		</div>
 	);
 }
@@ -1519,14 +1519,14 @@ function ReviewSummaryCard({
 				    drops the timing to its own line rather than clipping the
 				    reviewer's name. The verdict and its actions stay pinned right. */}
 				<span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
-					<span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground">
+					<span className="inline-flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground">
 						{renderAvatar(actor)}
 						<span className="truncate">{actor}</span>
-						{isBot ? <span className="shrink-0 font-mono text-micro text-passive">{labels.bot}</span> : null}
+						{isBot ? <span className="shrink-0 font-mono text-xs text-passive">{labels.bot}</span> : null}
 					</span>
 					{/* Two facts, two nodes: "Earlier commit" and the time stay separately
 					    addressable even though they read as one line. */}
-					<span className="flex min-w-0 shrink-0 items-center gap-1 text-2xs text-passive">
+					<span className="flex min-w-0 shrink-0 items-center gap-1 text-xs text-passive">
 						{isEarlier ? (
 							<>
 								<span>{labels.earlierPass}</span>

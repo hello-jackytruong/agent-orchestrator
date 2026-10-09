@@ -185,7 +185,7 @@ export function SessionBranchSummary({
 					) : null}
 					{action ? <div className={hasWork ? "mt-3" : undefined}>{action}</div> : null}
 					{sendError ? (
-						<p className="mt-1.5 text-2xs leading-normal text-error" role="status">
+						<p className="mt-1.5 text-xs leading-normal text-error" role="status">
 							{sendError}
 						</p>
 					) : null}
@@ -231,7 +231,8 @@ function GitStatusRow({
 			type="button"
 		>
 			{icon}
-			<span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+			{/* The global `button { font: inherit }` rule outranks the size on the button, so it sits here. */}
+			<span className="flex min-w-0 flex-1 items-baseline gap-1.5 text-sm">
 				<span className="truncate">{label}</span>
 				{note ? (
 					<span className={noteTone === "warn" ? "shrink-0 text-xs text-status-in-review" : "shrink-0 text-xs text-passive"}>{note}</span>
