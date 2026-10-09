@@ -57,6 +57,7 @@ type Store interface {
 	ListPRComments(ctx context.Context, prURL string) ([]domain.PullRequestComment, error)
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
 	ListWorkspaceRepos(ctx context.Context, projectID string) ([]domain.WorkspaceRepoRecord, error)
+	ListSessionStatusTransitions(ctx context.Context, sessionID domain.SessionID, limit, offset int64) ([]domain.SessionStatusTransition, int64, error)
 }
 
 // ListFilter captures API-facing session list query filters.
@@ -1573,4 +1574,25 @@ func (s *Service) harnessSignals(h domain.AgentHarness) bool {
 		return false
 	}
 	return s.signalCapable(h)
+}
+
+// ListTransitions returns paginated status transitions for a session.
+func (s *Service) ListTransitions(ctx context.Context, id domain.SessionID, limit, offset int64) ([]domain.SessionStatusTransition, int64, error) {
+	_, found, err := s.store.GetSession(ctx, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !found {
+		return nil, 0, ports.ErrSessionNotFound
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return s.store.ListSessionStatusTransitions(ctx, id, limit, offset)
 }

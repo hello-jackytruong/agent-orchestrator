@@ -6,6 +6,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,12 +14,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/ownership"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reqid"
 	"github.com/aoagents/agent-orchestrator/backend/internal/sessionguard"
 )
+
+// sessionTransitionStore persists granular status transitions for timeline tracking.
+// It stays optional on the broad lifecycle store so lightweight test fakes do not need to implement it.
+type sessionTransitionStore interface {
+	InsertSessionStatusTransition(ctx context.Context, t domain.SessionStatusTransition) (domain.SessionStatusTransition, error)
+	CloseSessionStatusTransition(ctx context.Context, id string, endedAt time.Time, durationMs int64) error
+	GetLatestSessionStatusTransition(ctx context.Context, sessionID domain.SessionID) (domain.SessionStatusTransition, bool, error)
+}
 
 type sessionStore interface {
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
@@ -530,6 +541,55 @@ func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.Session
 		// runtime reaper must not leave the session's Docker containers behind
 		// just because it never called MarkTerminated directly.
 		m.reapSessionContainers(ctx, id)
+	}
+	return nil
+}
+
+func (m *Manager) recordTransition(ctx context.Context, sessionID domain.SessionID, toStatus string, source string, reason string, metadata json.RawMessage, now time.Time) error {
+	ts, ok := m.store.(sessionTransitionStore)
+	if !ok || ts == nil {
+		return nil
+	}
+	latest, found, err := ts.GetLatestSessionStatusTransition(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("get latest session status transition: %w", err)
+	}
+	if found && latest.ToStatus == toStatus {
+		// Redundant status update, deduplicate
+		return nil
+	}
+
+	var fromStatus *string
+	if found {
+		fromStatus = &latest.ToStatus
+		if latest.EndedAt == nil {
+			duration := now.Sub(latest.StartedAt).Milliseconds()
+			if duration < 0 {
+				duration = 0
+			}
+			if err := ts.CloseSessionStatusTransition(ctx, latest.ID, now, duration); err != nil {
+				return fmt.Errorf("close session status transition: %w", err)
+			}
+		}
+	}
+
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+
+	if _, err := ts.InsertSessionStatusTransition(ctx, domain.SessionStatusTransition{
+		ID:            uuid.NewString(),
+		SessionID:     sessionID,
+		FromStatus:    fromStatus,
+		ToStatus:      toStatus,
+		TriggerSource: source,
+		Reason:        reasonPtr,
+		Metadata:      metadata,
+		StartedAt:     now,
+		CreatedAt:     now,
+	}); err != nil {
+		return fmt.Errorf("insert session status transition: %w", err)
 	}
 	return nil
 }
@@ -1053,7 +1113,14 @@ retryProjection:
 	// that pinged them has nothing left to resolve.
 	resolutions := needsInputResolutions(rec, next, now)
 	waitingEvents := m.waitingInputEvents(next, prevState, prevAt, now)
+	stateChanged := prevState != next.Activity.State
+	targetState := string(next.Activity.State)
 	m.mu.Unlock()
+	if stateChanged {
+		if err := m.recordTransition(ctx, id, targetState, "agent", s.Event, nil, now); err != nil {
+			return err
+		}
+	}
 	if err := m.acknowledgeAgentSwitchTarget(ctx, id, s, now); err != nil {
 		return err
 	}
@@ -1626,6 +1693,9 @@ func (m *Manager) markSpawned(
 	if err != nil {
 		return err
 	}
+	if err := m.recordTransition(ctx, id, string(domain.ActivityIdle), "system", "Session spawned", nil, m.clock()); err != nil {
+		return err
+	}
 	reactivateSessionUsage(ctx, id, launchID, reactivator)
 	return nil
 }
@@ -1863,7 +1933,13 @@ func (m *Manager) MarkTerminated(ctx context.Context, id domain.SessionID) error
 			return err
 		}
 		switch outcome {
-		case terminationApplied, terminationAlreadyApplied:
+		case terminationApplied:
+			if err := m.recordTransition(ctx, id, "terminated", "system", "Session terminated", nil, m.clock()); err != nil {
+				return err
+			}
+			m.reapSessionContainers(ctx, id)
+			return nil
+		case terminationAlreadyApplied:
 			m.reapSessionContainers(ctx, id)
 			return nil
 		case terminationLaunchChanged:

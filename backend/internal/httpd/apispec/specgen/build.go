@@ -252,6 +252,9 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersSpawnSessionRequest":                      "SpawnSessionRequest",
 	"ControllersSpawnSessionResponse":                     "SpawnSessionResponse",
 	"ControllersSessionResponse":                          "SessionResponse",
+	"ControllersSessionTimelineQuery":                     "SessionTimelineQuery",
+	"ControllersSessionTimelineItemResponse":              "SessionTimelineItemResponse",
+	"ControllersSessionTimelineResponse":                  "SessionTimelineResponse",
 	"ControllersSessionArtifactView":                      "SessionArtifact",
 	"ControllersSessionPreviewResponse":                   "SessionPreviewResponse",
 	"ControllersSetSessionPreviewRequest":                 "SetSessionPreviewRequest",
@@ -2254,6 +2257,17 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SessionResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/timeline", id: "getSessionTimeline", tag: "sessions",
+			summary:    "Get session status timeline",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.SessionTimelineQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SessionTimelineResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},
