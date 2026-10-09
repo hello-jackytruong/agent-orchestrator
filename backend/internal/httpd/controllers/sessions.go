@@ -30,6 +30,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/attachmentstore"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -138,6 +139,7 @@ type SessionService interface {
 	InvalidateWorkspaceCache(id domain.SessionID)
 	Pin(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	Unpin(ctx context.Context, id domain.SessionID) (domain.Session, error)
+	ListTransitions(ctx context.Context, id domain.SessionID, limit, offset int64) ([]domain.SessionStatusTransition, int64, error)
 }
 
 type sessionMessageOptionsSender interface {
@@ -202,6 +204,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions", c.spawn)
 	r.Post("/sessions/cleanup", c.cleanup)
 	r.Get("/sessions/{sessionId}", c.get)
+	r.Get("/sessions/{sessionId}/timeline", c.timeline)
 	r.Get("/sessions/{sessionId}/preview", c.preview)
 	r.Post("/sessions/{sessionId}/preview", c.setPreview)
 	r.Delete("/sessions/{sessionId}/preview", c.clearPreview)
@@ -468,6 +471,76 @@ func (c *SessionsController) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(r, sess)})
+}
+
+func (c *SessionsController) timeline(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/timeline")
+		return
+	}
+	id := sessionID(r)
+	limit, offset, err := parseTimelinePagination(r)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+
+	items, total, err := c.Svc.ListTransitions(r.Context(), id, limit, offset)
+	if errors.Is(err, ports.ErrSessionNotFound) {
+		envelope.WriteError(w, r, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session"))
+		return
+	}
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+
+	respItems := make([]SessionTimelineItemResponse, len(items))
+	for i, item := range items {
+		respItems[i] = SessionTimelineItemResponse{
+			ID:            item.ID,
+			SessionID:     item.SessionID,
+			FromStatus:    item.FromStatus,
+			ToStatus:      item.ToStatus,
+			TriggerSource: item.TriggerSource,
+			Reason:        item.Reason,
+			Metadata:      item.Metadata,
+			StartedAt:     item.StartedAt,
+			EndedAt:       item.EndedAt,
+			DurationMs:    item.DurationMs,
+			CreatedAt:     item.CreatedAt,
+		}
+	}
+
+	envelope.WriteJSON(w, http.StatusOK, SessionTimelineResponse{
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
+		Items:  respItems,
+	})
+}
+
+func parseTimelinePagination(r *http.Request) (int64, int64, error) {
+	limit := int64(100)
+	if qLimit := r.URL.Query().Get("limit"); qLimit != "" {
+		val, err := strconv.ParseInt(qLimit, 10, 64)
+		if err != nil || val <= 0 {
+			return 0, 0, apierr.Invalid("INVALID_LIMIT", "limit must be a positive integer", nil)
+		}
+		if val > 500 {
+			val = 500
+		}
+		limit = val
+	}
+	offset := int64(0)
+	if qOffset := r.URL.Query().Get("offset"); qOffset != "" {
+		val, err := strconv.ParseInt(qOffset, 10, 64)
+		if err != nil || val < 0 {
+			return 0, 0, apierr.Invalid("INVALID_OFFSET", "offset must be a non-negative integer", nil)
+		}
+		offset = val
+	}
+	return limit, offset, nil
 }
 
 func (c *SessionsController) preview(w http.ResponseWriter, r *http.Request) {

@@ -2636,6 +2636,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get session status timeline */
+        get: operations["getSessionTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/workspace/diffs": {
         parameters: {
             query?: never;
@@ -5111,6 +5128,58 @@ export interface components {
             /** Format: date-time */
             startedAt: string;
             tool: string;
+        };
+        SessionTimelineItemResponse: {
+            /**
+             * Format: date-time
+             * @description Record creation timestamp.
+             */
+            createdAt: string;
+            /** @description Duration spent in this status in milliseconds (null if active). */
+            durationMs?: null | number;
+            /**
+             * Format: date-time
+             * @description Timestamp when this status ended (null if active).
+             */
+            endedAt?: null | string;
+            /** @description Previous status (null if first transition). */
+            fromStatus?: null | string;
+            /** @description Transition record ID. */
+            id: string;
+            /** @description Structured metadata associated with transition. */
+            metadata?: unknown;
+            /** @description Human-readable reason or error summary. */
+            reason?: null | string;
+            /** @description Session ID. */
+            sessionId: string;
+            /**
+             * Format: date-time
+             * @description Timestamp when this status started.
+             */
+            startedAt: string;
+            /** @description New status. */
+            toStatus: string;
+            /** @description Trigger source: agent, user, scm_ci, scm_review, or system. */
+            triggerSource: string;
+        };
+        SessionTimelineResponse: {
+            /** @description Chronological list of status transitions. */
+            items: components["schemas"]["SessionTimelineItemResponse"][];
+            /**
+             * Format: int64
+             * @description Maximum items requested.
+             */
+            limit: number;
+            /**
+             * Format: int64
+             * @description Pagination offset.
+             */
+            offset: number;
+            /**
+             * Format: int64
+             * @description Total number of transitions for this session.
+             */
+            total: number;
         };
         SessionUsageResponse: {
             harnesses: components["schemas"]["UsageHarnessResponse"][];
@@ -15869,6 +15938,61 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSessionTimeline: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of transition records to return. Defaults to 100. */
+                limit?: number;
+                /** @description Pagination offset. */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionTimelineResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

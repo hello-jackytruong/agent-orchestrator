@@ -454,6 +454,35 @@ type SessionResponse struct {
 	Session SessionView `json:"session"`
 }
 
+// SessionTimelineQuery holds query parameters for GET /api/v1/sessions/{sessionId}/timeline.
+type SessionTimelineQuery struct {
+	Limit  int64 `query:"limit,omitempty" default:"100" minimum:"1" maximum:"500" description:"Maximum number of transition records to return. Defaults to 100."`
+	Offset int64 `query:"offset,omitempty" default:"0" minimum:"0" description:"Pagination offset."`
+}
+
+// SessionTimelineItemResponse is a single status transition in the session timeline.
+type SessionTimelineItemResponse struct {
+	ID            string           `json:"id" description:"Transition record ID."`
+	SessionID     domain.SessionID `json:"sessionId" description:"Session ID."`
+	FromStatus    *string          `json:"fromStatus,omitempty" description:"Previous status (null if first transition)."`
+	ToStatus      string           `json:"toStatus" description:"New status."`
+	TriggerSource string           `json:"triggerSource" description:"Trigger source: agent, user, scm_ci, scm_review, or system."`
+	Reason        *string          `json:"reason,omitempty" description:"Human-readable reason or error summary."`
+	Metadata      json.RawMessage  `json:"metadata,omitempty" description:"Structured metadata associated with transition."`
+	StartedAt     time.Time        `json:"startedAt" description:"Timestamp when this status started."`
+	EndedAt       *time.Time       `json:"endedAt,omitempty" description:"Timestamp when this status ended (null if active)."`
+	DurationMs    *int64           `json:"durationMs,omitempty" description:"Duration spent in this status in milliseconds (null if active)."`
+	CreatedAt     time.Time        `json:"createdAt" description:"Record creation timestamp."`
+}
+
+// SessionTimelineResponse is the response body for GET /api/v1/sessions/{sessionId}/timeline.
+type SessionTimelineResponse struct {
+	Total  int64                         `json:"total" description:"Total number of transitions for this session."`
+	Limit  int64                         `json:"limit" description:"Maximum items requested."`
+	Offset int64                         `json:"offset" description:"Pagination offset."`
+	Items  []SessionTimelineItemResponse `json:"items" description:"Chronological list of status transitions."`
+}
+
 // SpawnSessionResponse includes ephemeral measurements of the final assembled
 // prompt texts. The fields are required so a measured zero remains distinct
 // from a response that never measured prompt sizes.

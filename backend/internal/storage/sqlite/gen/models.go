@@ -730,6 +730,20 @@ type SessionInterfaceTransitionMessage struct {
 	AuthoredByUser  bool
 }
 
+type SessionStatusTransition struct {
+	ID            string
+	SessionID     string
+	FromStatus    sql.NullString
+	ToStatus      string
+	TriggerSource string
+	Reason        sql.NullString
+	Metadata      string
+	StartedAt     time.Time
+	EndedAt       sql.NullTime
+	DurationMs    sql.NullInt64
+	CreatedAt     time.Time
+}
+
 type SessionWorktree struct {
 	SessionID    domain.SessionID
 	RepoName     string
