@@ -2940,6 +2940,8 @@ function ReviewPanel({
 
 	return (
 		<Section title={t("inspector.review.controls")} titleClassName={inspectorSectionHeadingClass} surface={false}>
+			{/* Notices and the control rows are separate groups: 12px between them. */}
+			<div className="flex min-w-0 flex-col gap-3">
 					{error ? (
 						<p className="m-0 rounded-md border border-error/28 bg-error/8 px-2.5 py-2 text-sm-md leading-normal text-error">
 							{apiErrorMessage(error, t("inspector.reviewRequestFailed"))}
@@ -2958,7 +2960,7 @@ function ReviewPanel({
 						<TooltipTrigger asChild>
 							<button
 								aria-label={notice}
-								className="mb-2 flex max-w-full shrink-0 items-start gap-1 self-start rounded-sm text-left text-2xs font-medium leading-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+								className="flex max-w-full shrink-0 items-start gap-1 self-start rounded-sm text-left text-2xs font-medium leading-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
 								type="button"
 							>
 								<Info aria-hidden="true" className="mt-px size-icon-2xs shrink-0" />
@@ -3109,6 +3111,7 @@ function ReviewPanel({
 						</div>
 					)}
 				</div>
+			</div>
 		</Section>
 	);
 }

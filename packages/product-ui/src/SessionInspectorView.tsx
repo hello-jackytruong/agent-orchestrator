@@ -41,10 +41,16 @@ const inspectorBodyBaseClass = "min-h-0 flex-1";
 const inspectorScrollableBodyClass = "inspector-scrollbar overflow-x-hidden overflow-y-auto pb-3";
 export const inspectorEmptyClass = "text-xs text-settings-muted leading-normal";
 /**
- * Positions each section header in the panel: top/left inset match; bottom is half of top so
- * stacked headers share the gap (pb + next pt).
+ * Positions each section header in the panel. With the button's own 6px inset, the heading text
+ * sits 12px below the section's top edge and 12px above the section's first content.
  */
-export const inspectorSectionHeaderSlotClass = "px-1.5 pt-1.5 pb-0.5";
+export const inspectorSectionHeaderSlotClass = "px-1.5 py-1.5";
+
+/**
+ * Separates stacked sections: 12px of margin plus the header's 12px makes 24px from one section's
+ * last content to the next heading. The first section keeps its 12px under the tab bar.
+ */
+const inspectorSectionStackClass = "mt-3 first:mt-0";
 
 /** Inset inside the hover pill (equal x/y so label sits evenly in the gray highlight). */
 export const inspectorSectionHeaderInsetClass = "p-1.5";
@@ -339,7 +345,7 @@ export function InspectorSection({
 	);
 
 	return (
-		<section className={cn("flex flex-col", className)} data-testid="inspector-section">
+		<section className={cn("flex flex-col", inspectorSectionStackClass, className)} data-testid="inspector-section">
 			{heading}
 			{canCollapse ? (
 				<AnimatePresence initial={false}>
@@ -403,12 +409,12 @@ export function SessionInspectorSummaryView({
 			{branch}
 			{pullRequestTitle && pullRequestCards ? (
 				<InspectorSection surface={false} title={pullRequestTitle} titleClassName={inspectorSectionHeadingClass}>
-					<div className="flex flex-col gap-1.5">{pullRequestCards}</div>
+					<div className="flex flex-col gap-2">{pullRequestCards}</div>
 				</InspectorSection>
 			) : null}
 			{artifactTitle ? (
 				<InspectorSection surface={false} title={artifactTitle} titleClassName={inspectorSectionHeadingClass}>
-					<div className="flex flex-col gap-1.5">{artifactCards}</div>
+					<div className="flex flex-col gap-2">{artifactCards}</div>
 				</InspectorSection>
 			) : null}
 			{reviews}
@@ -725,7 +731,7 @@ export function InspectorReviewsView({
 	if (groups.length === 0 && !liveReviewLabel) return null;
 	return (
 		<InspectorSection surface={false} title={labels.reviews} titleClassName={inspectorSectionHeadingClass}>
-			<div className="flex flex-col gap-1.5">
+			<div className="flex flex-col gap-2">
 				{liveReviewLabel ? (
 					<article
 						className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-settings-row px-3 py-2.5"

@@ -128,7 +128,7 @@ export function SessionBranchSummary({
 			{content}
 		</InspectorSection>
 	);
-	const cards = pullRequests ? <div className="flex flex-col gap-1.5">{pullRequests}</div> : null;
+	const cards = pullRequests ? <div className="flex flex-col gap-2">{pullRequests}</div> : null;
 
 	if (!showGit) return cards ? wrap(cards) : null;
 
@@ -158,7 +158,7 @@ export function SessionBranchSummary({
 
 	// The section body sits on the 12px content edge; the rows' hover fill bleeds to 6px.
 	return wrap(
-		<section aria-label={t("inspector.branch")} className="flex flex-col gap-2" data-testid="inspector-branch">
+		<section aria-label={t("inspector.branch")} className="flex flex-col gap-3" data-testid="inspector-branch">
 			{session.branch ? <BranchLine base={facts.base} branch={session.branch} /> : null}
 			{cards}
 			{hasWork || action || sendError ? (
@@ -183,7 +183,7 @@ export function SessionBranchSummary({
 							onClick={onOpenFiles}
 						/>
 					) : null}
-					{action ? <div className={hasWork ? "mt-2" : undefined}>{action}</div> : null}
+					{action ? <div className={hasWork ? "mt-3" : undefined}>{action}</div> : null}
 					{sendError ? (
 						<p className="mt-1.5 text-2xs leading-normal text-error" role="status">
 							{sendError}
