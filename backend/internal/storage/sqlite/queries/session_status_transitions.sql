@@ -24,7 +24,7 @@ SELECT id, session_id, from_status, to_status, trigger_source,
        reason, metadata, started_at, ended_at, duration_ms, created_at
 FROM session_status_transitions
 WHERE session_id = ?
-ORDER BY started_at ASC
+ORDER BY started_at DESC, rowid DESC
 LIMIT ? OFFSET ?;
 
 -- name: CountSessionStatusTransitions :one

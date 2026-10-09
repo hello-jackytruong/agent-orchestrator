@@ -76,12 +76,16 @@ func TestSessionStatusTransitionsStore(t *testing.T) {
 		t.Fatalf("latest = %+v, want trans-2", latest)
 	}
 
-	// 5. ListSessionStatusTransitions (note: session creation also seeded 1 baseline transition via backfill in production, but in fresh create it's only what we inserted or what create inserted)
+	// 5. ListSessionStatusTransitions returns newest rows first so bounded
+	// inspector fetches include the current/recent status rows.
 	items, total, err := st.ListSessionStatusTransitions(ctx, sess.ID, 10, 0)
 	if err != nil {
 		t.Fatalf("list transitions: %v", err)
 	}
 	if total < 2 || len(items) < 2 {
 		t.Fatalf("expected at least 2 transitions, got len=%d, total=%d", len(items), total)
+	}
+	if items[0].ID != "trans-2" || items[1].ID != "trans-1" {
+		t.Fatalf("transitions order = [%s, %s], want newest first [trans-2, trans-1]", items[0].ID, items[1].ID)
 	}
 }
