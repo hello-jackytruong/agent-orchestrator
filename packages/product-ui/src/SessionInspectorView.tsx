@@ -38,25 +38,25 @@ export type InspectorTab = {
 
 const inspectorShellClass = "@container/inspector flex h-full min-h-0 flex-col overflow-hidden";
 const inspectorBodyBaseClass = "min-h-0 flex-1";
-const inspectorScrollableBodyClass = "inspector-scrollbar overflow-x-hidden overflow-y-auto pb-3";
+/** pt-0.5 + header slot 2px + button 8px puts the first heading text 12px under the tab bar. */
+const inspectorScrollableBodyClass = "inspector-scrollbar overflow-x-hidden overflow-y-auto pt-0.5 pb-3";
 export const inspectorEmptyClass = "text-xs text-settings-muted leading-normal";
 /**
- * Positions each section header in the panel. With the button's own 6px inset, the heading text
- * sits 12px below the section's top edge and 12px above the section's first content.
+ * Positions each section header in the panel. Collapsed headers stack like a list: 28px hit
+ * targets 4px apart (2px slot padding on each side).
  */
-export const inspectorSectionHeaderSlotClass = "px-1.5 py-1.5";
+export const inspectorSectionHeaderSlotClass = "px-1.5 py-0.5";
+
+/** Inset inside the hover pill; with the 12px label it makes a 28px hit target. */
+export const inspectorSectionHeaderInsetClass = "px-1.5 py-2";
 
 /**
- * Separates stacked sections: 12px of margin plus the header's 12px makes 24px from one section's
- * last content to the next heading. The first section keeps its 12px under the tab bar.
+ * Body inset matches header label (panel px-1.5 + header button px-1.5). The vertical padding
+ * lives here, inside the part that collapses, so a closed section adds nothing past its header:
+ * pt-0.5 puts content 12px under the heading text, pb-3.5 puts the next heading text 24px under
+ * the last content. The last section drops pb so the scroll end stays at 12px.
  */
-const inspectorSectionStackClass = "mt-3 first:mt-0";
-
-/** Inset inside the hover pill (equal x/y so label sits evenly in the gray highlight). */
-export const inspectorSectionHeaderInsetClass = "p-1.5";
-
-/** Body inset matches header label (panel px-1.5 + header button p-1.5). */
-export const inspectorSectionInsetClass = "px-3 pb-0";
+export const inspectorSectionInsetClass = "px-3 pt-0.5 pb-3.5 group-last/inspector-section:pb-0";
 
 /** Inspector tab section titles: sentence case, normal weight (not settings-rail small caps). */
 export const inspectorSectionHeadingClass =
@@ -336,7 +336,7 @@ export function InspectorSection({
 	const bodyPanel = (
 		<div
 			aria-labelledby={title ? headingId : undefined}
-			className={cn("min-w-0", inspectorSectionInsetClass, heading ? "pt-0" : "pt-2")}
+			className={cn("min-w-0", inspectorSectionInsetClass, !heading && "pt-2")}
 			id={contentId}
 			role={canCollapse ? "region" : undefined}
 		>
@@ -345,7 +345,7 @@ export function InspectorSection({
 	);
 
 	return (
-		<section className={cn("flex flex-col", inspectorSectionStackClass, className)} data-testid="inspector-section">
+		<section className={cn("group/inspector-section flex flex-col", className)} data-testid="inspector-section">
 			{heading}
 			{canCollapse ? (
 				<AnimatePresence initial={false}>
