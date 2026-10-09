@@ -23,3 +23,19 @@ export function formatTimeTerse(
 	if (diffHours < 24) return `${diffHours}h`;
 	return `${Math.floor(diffHours / 24)}d`;
 }
+
+/** Formats duration in milliseconds to a compact label: "< 1s", "< 5s", "25s", "4m 12s", "1h 2m". */
+export function formatDurationCompact(durationMs: number): string {
+	if (durationMs < 1000) return "< 1s";
+	if (durationMs < 5000) return "< 5s";
+	const total = Math.max(0, Math.round(durationMs / 1000));
+	if (total < 60) return `${total}s`;
+	const minutes = Math.floor(total / 60);
+	const seconds = total % 60;
+	if (minutes < 60) {
+		return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+	}
+	const hours = Math.floor(minutes / 60);
+	const remMinutes = minutes % 60;
+	return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`;
+}
