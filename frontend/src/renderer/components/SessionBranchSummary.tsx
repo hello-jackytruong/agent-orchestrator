@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
+import { InspectorSection, inspectorSectionHeadingClass } from "@aoagents/product-ui";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -51,13 +52,17 @@ export function SessionBranchSummary({
 	openPRNumber,
 	pullRequests,
 	session,
+	title,
 }: {
 	hostId?: string;
 	onOpenFiles: () => void;
 	/** The open or draft PR that new commits would update. */
 	openPRNumber?: number;
+	/** The PR cards, shown under the branch line. */
 	pullRequests: ReactNode;
 	session: WorkspaceSession;
+	/** The section heading: "Pull request", or the count when there are several. */
+	title: string;
 }) {
 	const { t } = useTranslation();
 	const key = sessionUiKey(session.id, hostId);
@@ -118,7 +123,14 @@ export function SessionBranchSummary({
 		return () => clearTimeout(timer);
 	}, [clearPending, key, pending]);
 
-	if (!showGit) return pullRequests ?? null;
+	const wrap = (content: ReactNode) => (
+		<InspectorSection surface={false} title={title} titleClassName={inspectorSectionHeadingClass}>
+			{content}
+		</InspectorSection>
+	);
+	const cards = pullRequests ? <div className="flex flex-col gap-1.5">{pullRequests}</div> : null;
+
+	if (!showGit) return cards ? wrap(cards) : null;
 
 	const commitsRow = commitsRowView(facts, t);
 	const hasWork = facts.uncommitted.length > 0 || commitsRow !== null;
@@ -144,47 +156,48 @@ export function SessionBranchSummary({
 		);
 	}
 
-	return (
-		<section aria-label={t("inspector.branch")} data-testid="inspector-branch">
+	// The section body sits on the 12px content edge; the rows' hover fill bleeds to 6px.
+	return wrap(
+		<section aria-label={t("inspector.branch")} className="flex flex-col gap-2" data-testid="inspector-branch">
 			{session.branch ? <BranchLine base={facts.base} branch={session.branch} /> : null}
-			{pullRequests}
-			{/* The pull request section brings its own inset. Rows, the action and the
-			    error sit on the 12px content edge; the rows' hover fill bleeds to 6px. */}
-			<div className="flex flex-col px-3">
-				{facts.uncommitted.length > 0 ? (
-					<GitStatusRow
-						additions={sum(facts.uncommitted, "additions")}
-						deletions={sum(facts.uncommitted, "deletions")}
-						icon={<Pencil aria-hidden="true" className="size-icon-sm shrink-0 text-muted-foreground" />}
-						label={t("inspector.git.uncommittedFiles", { count: facts.uncommitted.length })}
-						onClick={onOpenFiles}
-					/>
-				) : null}
-				{commitsRow ? (
-					<GitStatusRow
-						additions={sum(facts.committed, "additions")}
-						deletions={sum(facts.committed, "deletions")}
-						icon={<GitCommitHorizontal aria-hidden="true" className="size-icon-sm shrink-0 text-muted-foreground" />}
-						label={commitsRow.label}
-						note={commitsRow.note}
-						noteTone={commitsRow.noteTone}
-						onClick={onOpenFiles}
-					/>
-				) : null}
-				{action ? <div className="mt-2">{action}</div> : null}
-				{sendError ? (
-					<p className="mt-1.5 text-2xs leading-normal text-error" role="status">
-						{sendError}
-					</p>
-				) : null}
-			</div>
-		</section>
+			{cards}
+			{hasWork || action || sendError ? (
+				<div className="flex flex-col">
+					{facts.uncommitted.length > 0 ? (
+						<GitStatusRow
+							additions={sum(facts.uncommitted, "additions")}
+							deletions={sum(facts.uncommitted, "deletions")}
+							icon={<Pencil aria-hidden="true" className="size-icon-sm shrink-0 text-muted-foreground" />}
+							label={t("inspector.git.uncommittedFiles", { count: facts.uncommitted.length })}
+							onClick={onOpenFiles}
+						/>
+					) : null}
+					{commitsRow ? (
+						<GitStatusRow
+							additions={sum(facts.committed, "additions")}
+							deletions={sum(facts.committed, "deletions")}
+							icon={<GitCommitHorizontal aria-hidden="true" className="size-icon-sm shrink-0 text-muted-foreground" />}
+							label={commitsRow.label}
+							note={commitsRow.note}
+							noteTone={commitsRow.noteTone}
+							onClick={onOpenFiles}
+						/>
+					) : null}
+					{action ? <div className={hasWork ? "mt-2" : undefined}>{action}</div> : null}
+					{sendError ? (
+						<p className="mt-1.5 text-2xs leading-normal text-error" role="status">
+							{sendError}
+						</p>
+					) : null}
+				</div>
+			) : null}
+		</section>,
 	);
 }
 
 function BranchLine({ base, branch }: { base?: string; branch: string }) {
 	return (
-		<div className="flex min-w-0 items-center gap-1.5 px-3 pt-3 font-mono text-xs text-muted-foreground">
+		<div className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-muted-foreground">
 			<GitBranch aria-hidden="true" className="size-icon-2xs shrink-0" />
 			<span className="min-w-0 truncate" title={branch}>
 				{branch}

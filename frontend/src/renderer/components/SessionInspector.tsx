@@ -452,24 +452,23 @@ const SummaryView = memo(function SummaryView({
 					onOpenFiles={onOpenFiles}
 					openPRNumber={openPRNumber}
 					pullRequests={hasPRs ? (
-						<Section surface={false} title={prSectionTitle} titleClassName={inspectorSectionHeadingClass}>
-							<div className="flex flex-col gap-1.5">
-								{prSummaries.map((pr) => (
-									<PRSummaryCard
-										canOpenReviews={canOpenReviews}
-										key={pr.url || pr.htmlUrl || pr.number}
-										onOpenReviews={onOpenReviews}
-										pr={pr}
-										hostId={hostId}
-										sessionId={session.id}
-										cloudOrgId={session.cloud?.orgId}
-									/>
-								))}
-								{linkedPRs.map((pr) => <LinkedPRCard external={isExternalRepository(pr, projectQuery.data)} key={pr.url} pr={pr} />)}
-							</div>
-						</Section>
+						<>
+						{prSummaries.map((pr) => (
+							<PRSummaryCard
+								canOpenReviews={canOpenReviews}
+								key={pr.url || pr.htmlUrl || pr.number}
+								onOpenReviews={onOpenReviews}
+								pr={pr}
+								hostId={hostId}
+								sessionId={session.id}
+								cloudOrgId={session.cloud?.orgId}
+							/>
+						))}
+						{linkedPRs.map((pr) => <LinkedPRCard external={isExternalRepository(pr, projectQuery.data)} key={pr.url} pr={pr} />)}
+						</>
 					) : null}
 					session={session}
+					title={prSectionTitle}
 				/>
 			}
 			completion={showSessionControls ? <SessionControls hostId={hostId} session={session} /> : undefined}

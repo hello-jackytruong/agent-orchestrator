@@ -891,10 +891,23 @@ describe("SessionInspector PR section", () => {
 
   it("omits the pull request section and PR policies until a PR is known, even for PR output", () => {
     renderWithQuery(<SessionInspector session={session([], { outputType: "pr" })} />);
-    expect(screen.queryByText("Pull request")).not.toBeInTheDocument();
+    expect(screen.queryByText(/PR #\d+/)).not.toBeInTheDocument();
     expect(screen.queryByText("No pull request opened yet.")).not.toBeInTheDocument();
     expect(screen.queryByText("Session controls")).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Automatically fix CI failures" })).not.toBeInTheDocument();
+  });
+
+  it("groups the branch line under the Pull request section and omits it when there is nothing to show", () => {
+    const { unmount } = renderWithQuery(<SessionInspector session={session([])} />);
+    const section = within(
+      screen.getByText("Pull request").closest("[data-testid='inspector-section']") as HTMLElement,
+    );
+    expect(section.getByRole("region", { name: "Branch" })).toBeInTheDocument();
+    expect(section.getByText("feat/ns")).toBeInTheDocument();
+    unmount();
+
+    renderWithQuery(<SessionInspector session={session([], { branch: undefined })} />);
+    expect(screen.queryByText("Pull request")).not.toBeInTheDocument();
   });
 
   it("hides the section entirely when the session has no known output type", () => {
@@ -902,7 +915,7 @@ describe("SessionInspector PR section", () => {
     expect(
       screen.queryByText("No pull request opened yet."),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Pull request")).not.toBeInTheDocument();
+    expect(screen.queryByText(/PR #\d+/)).not.toBeInTheDocument();
   });
 
   it("hides the section entirely when the session's output type is explicitly none", () => {
@@ -910,7 +923,7 @@ describe("SessionInspector PR section", () => {
     expect(
       screen.queryByText("No pull request opened yet."),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Pull request")).not.toBeInTheDocument();
+    expect(screen.queryByText(/PR #\d+/)).not.toBeInTheDocument();
   });
 
   it("keeps durable session policies in Summary and operational review controls in Reviews", async () => {
@@ -4489,7 +4502,7 @@ describe("SessionInspector summary reviews", () => {
     expect(
       screen.queryByRole("switch", { name: "Automatically fix review comments" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Pull request")).not.toBeInTheDocument();
+    expect(screen.queryByText(/PR #\d+/)).not.toBeInTheDocument();
     expect(screen.queryByText("No pull request opened yet.")).not.toBeInTheDocument();
   });
 
