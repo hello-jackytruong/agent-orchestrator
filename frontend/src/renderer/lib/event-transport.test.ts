@@ -503,6 +503,9 @@ describe("createEventTransport", () => {
 			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
 				queryKey: ["editor-handoff", "session-1"],
 			}, { cancelRefetch: false });
+			expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+				queryKey: ["sessions", "timeline"],
+			}, { cancelRefetch: false });
 		} finally {
 			vi.useRealTimers();
 		}

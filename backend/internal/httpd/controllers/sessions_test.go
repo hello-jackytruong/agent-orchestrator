@@ -42,6 +42,9 @@ import (
 type fakeSessionService struct {
 	cleanupPending             bool
 	sessions                   map[domain.SessionID]domain.Session
+	transitions                map[domain.SessionID][]domain.SessionStatusTransition
+	lastTransitionLimit        int64
+	lastTransitionOffset       int64
 	sent                       string
 	sentAttachment             *ports.SpawnAttachment
 	sentDeliveryOptions        ports.MessageDeliveryOptions
@@ -231,6 +234,7 @@ func newFakeSessionService() *fakeSessionService {
 	s := domain.Session{SessionRecord: domain.SessionRecord{ID: "ao-1", ProjectID: "ao", Kind: domain.KindWorker, Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}, AutoInjectReview: true, AutoInjectCI: true, CreatedAt: now, UpdatedAt: now}, Status: domain.StatusIdle, TerminalHandleID: "ao-1/terminal_0"}
 	return &fakeSessionService{
 		sessions:      map[domain.SessionID]domain.Session{s.ID: s},
+		transitions:   map[domain.SessionID][]domain.SessionStatusTransition{},
 		agentSwitches: map[domain.AgentSwitchID]domain.AgentSwitch{},
 	}
 }
@@ -356,6 +360,24 @@ func (f *fakeSessionService) Unpin(_ context.Context, id domain.SessionID) (doma
 	s.PinnedAt = nil
 	f.sessions[id] = s
 	return s, nil
+}
+
+func (f *fakeSessionService) ListTransitions(_ context.Context, id domain.SessionID, limit, offset int64) ([]domain.SessionStatusTransition, int64, error) {
+	f.lastTransitionLimit = limit
+	f.lastTransitionOffset = offset
+	if _, ok := f.sessions[id]; !ok {
+		return nil, 0, ports.ErrSessionNotFound
+	}
+	all := f.transitions[id]
+	total := int64(len(all))
+	if offset >= total {
+		return []domain.SessionStatusTransition{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
 }
 
 func (f *fakeSessionService) SetReviewerHarness(_ context.Context, id domain.SessionID, harness domain.ReviewerHarness, config domain.AgentConfig) (domain.Session, error) {

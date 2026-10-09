@@ -21,11 +21,13 @@ import {
 	type InspectorReviewLabels,
 	type InspectorReviewSummaryAction,
 	type InspectorTimelineEvent,
+	type InspectorTimelineTone,
 	type InspectorView,
 } from "@aoagents/product-ui";
 import {
 	Archive,
 	ArrowUpRight,
+	Bot,
 	ChevronDown,
 	ChevronRight,
 	Files as FilesIcon,
@@ -35,8 +37,12 @@ import {
 	Info,
 	Play,
 	Loader2,
+	MessageCircle,
 	MessageSquare,
+	Settings2,
+	UserRound,
 	X,
+	Zap,
 } from "lucide-react";
 import type { components } from "../../api/schema";
 import { reviewerConversationQueryKey } from "../hooks/useReviewerConversation";
@@ -47,7 +53,8 @@ import { projectNavigateTarget, sessionNavigateTarget } from "../lib/navigate-to
 import { WORKER_DEFAULT_REVIEWERS } from "../lib/reviewer-harnesses";
 import { cloudSessionsQueryKey, workspaceQueryKeyForHost } from "../hooks/useWorkspaceQuery";
 import { captureRendererEvent } from "../lib/telemetry";
-import { formatTimeCompact } from "../lib/format-time";
+import { formatDurationCompact, formatTimeCompact } from "../lib/format-time";
+import { useSessionStatusTimeline } from "../hooks/useSessionStatusTimeline";
 import { AgentAvatar } from "./AgentAvatar";
 import { OrchestratorChildrenSection } from "./OrchestratorChildrenSection";
 import { ProductExternalLink } from "./ProductExternalLink";
@@ -1537,7 +1544,72 @@ type SortableTimelineEvent = InspectorTimelineEvent & { sortTime: number };
 // ponytail: newest 5 commits only; a "show all" control when long sessions need it.
 const TIMELINE_COMMIT_LIMIT = 5;
 
+function timelineTriggerLabel(source: string, t: TFunction): string {
+	switch (source) {
+		case "agent":
+			return t("inspector.timeline.trigger.agent");
+		case "user":
+			return t("inspector.timeline.trigger.user");
+		case "scm_ci":
+			return t("inspector.timeline.trigger.ci");
+		case "scm_review":
+			return t("inspector.timeline.trigger.reviewer");
+		case "system":
+		default:
+			return t("inspector.timeline.trigger.system");
+	}
+}
+
+function timelineTriggerIcon(source: string, label: string) {
+	const iconClass = "size-3.5 text-passive";
+	switch (source) {
+		case "agent":
+			return <Bot aria-label={label} className={iconClass} />;
+		case "user":
+			return <UserRound aria-label={label} className={iconClass} />;
+		case "scm_ci":
+			return <Settings2 aria-label={label} className={iconClass} />;
+		case "scm_review":
+			return <MessageCircle aria-label={label} className={iconClass} />;
+		case "system":
+		default:
+			return <Zap aria-label={label} className={iconClass} />;
+	}
+}
+
+function timelineStatusLabel(status: string, t: TFunction): string {
+	switch (status) {
+		case "active":
+		case "working":
+			return t("inspector.timeline.status.working");
+		case "idle":
+			return t("inspector.timeline.status.idle");
+		case "needs_input":
+		case "waiting_input":
+			return t("inspector.timeline.status.inputNeeded");
+		case "blocked":
+			return t("inspector.timeline.status.blocked");
+		case "ci_failed":
+			return t("inspector.timeline.status.ciFailed");
+		case "in_review":
+			return t("inspector.timeline.status.inReview");
+		case "merged":
+			return t("inspector.timeline.status.merged");
+		case "exited":
+			return t("inspector.timeline.status.exited");
+		case "terminated":
+			return t("inspector.timeline.status.terminated");
+		case "provisioning":
+			return t("inspector.timeline.status.provisioning");
+		case "ready":
+			return t("inspector.timeline.status.ready");
+		default:
+			return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ");
+	}
+}
+
 function ActivityTimeline({ hostId, prs, session }: { hostId?: string; prs: SessionPRSummary[]; session: WorkspaceSession }) {
+	const { t } = useTranslation();
 	// Keyed on the daemon's commit count, not the shared history query that every
 	// file edit invalidates, so only a new commit refetches.
 	const commitCount = session.branchState?.commits ?? 0;
@@ -1548,6 +1620,22 @@ function ActivityTimeline({ hostId, prs, session }: { hostId?: string; prs: Sess
 		placeholderData: (previous) => previous,
 		enabled: !session.cloud && session.kind !== "orchestrator",
 	});
+
+	const [timelineLimit, setTimelineLimit] = useState(100);
+	const timeline = useSessionStatusTimeline(session.id, {
+		hostId,
+		limit: timelineLimit,
+		enabled: Boolean(session.id),
+	});
+
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const hasActive = timeline.data?.items?.some((item) => !item.endedAt);
+		if (!hasActive) return;
+		const timer = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(timer);
+	}, [timeline.data]);
+
 	const events: SortableTimelineEvent[] = [];
 	const pushEvent = (event: InspectorTimelineEvent, timestamp?: string | null) => {
 		events.push({ ...event, sortTime: timelineSortTime(timestamp) });
@@ -1623,6 +1711,67 @@ function ActivityTimeline({ hostId, prs, session }: { hostId?: string; prs: Sess
 		);
 	}
 
+	for (const item of timeline.data?.items ?? []) {
+		const triggerLabel = timelineTriggerLabel(item.triggerSource, t);
+		const isActive = !item.endedAt;
+		let durationText: string;
+		if (isActive) {
+			const elapsed = Math.max(0, now - Date.parse(item.startedAt));
+			durationText = t("inspector.timeline.runningDuration", {
+				duration: formatDurationCompact(elapsed),
+			});
+		} else {
+			const duration = item.durationMs ?? (Date.parse(item.endedAt!) - Date.parse(item.startedAt));
+			durationText = formatDurationCompact(duration);
+		}
+
+		let tone: InspectorTimelineTone = "neutral";
+		let markerBreathe = false;
+		if (isActive) {
+			tone = "now";
+			markerBreathe = true;
+		} else if (item.toStatus === "ci_failed" || item.toStatus === "terminated" || item.toStatus === "blocked") {
+			tone = "warn";
+		} else if (item.toStatus === "merged") {
+			tone = "good";
+		}
+
+		pushEvent(
+			{
+				tone,
+				markerBreathe,
+				content: (
+					<span className="inline-flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+						<span className="shrink-0">{timelineTriggerIcon(item.triggerSource, triggerLabel)}</span>
+						<span className="font-semibold text-foreground">{timelineStatusLabel(item.toStatus, t)}</span>
+						<span className="text-passive text-[11px] font-mono">{durationText}</span>
+						{item.reason ? (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<span className="cursor-help text-passive truncate max-w-[140px] text-[11px]">
+										{item.reason}
+									</span>
+								</TooltipTrigger>
+								<TooltipContent>
+									<div className="max-w-xs space-y-1 text-xs">
+										<p className="font-medium text-foreground">{item.reason}</p>
+										{item.metadata && typeof item.metadata === "object" && Object.keys(item.metadata).length > 0 ? (
+											<pre className="font-mono text-[10px] text-muted-foreground overflow-x-auto">
+												{JSON.stringify(item.metadata, null, 2)}
+											</pre>
+										) : null}
+									</div>
+								</TooltipContent>
+							</Tooltip>
+						) : null}
+					</span>
+				),
+				timestamp: formatTimeCompact(item.startedAt),
+			},
+			item.startedAt,
+		);
+	}
+
 	const activityView = getAgentActivityView(session.activity);
 	const activityAt = session.activity?.lastActivityAt ?? session.updatedAt ?? session.createdAt;
 	pushEvent(
@@ -1652,7 +1801,24 @@ function ActivityTimeline({ hostId, prs, session }: { hostId?: string; prs: Sess
 		activityAt,
 	);
 
-	return <InspectorActivityTimelineView events={[...events].sort((a, b) => b.sortTime - a.sortTime)} />;
+	const totalTransitions = timeline.data?.total ?? 0;
+	const loadedTransitions = timeline.data?.items?.length ?? 0;
+	const hasMoreTransitions = totalTransitions > loadedTransitions;
+
+	return (
+		<div className="flex flex-col">
+			<InspectorActivityTimelineView events={[...events].sort((a, b) => b.sortTime - a.sortTime)} />
+			{hasMoreTransitions ? (
+				<button
+					type="button"
+					onClick={() => setTimelineLimit((prev) => prev + 100)}
+					className="mt-2 text-caption text-accent hover:underline text-left cursor-pointer"
+				>
+					{t("inspector.timeline.loadAllTransitions", { count: totalTransitions - loadedTransitions })}
+				</button>
+			) : null}
+		</div>
+	);
 }
 
 function PRTimelineLink({ pr, verb }: { pr: SessionPRSummary; verb: string }) {

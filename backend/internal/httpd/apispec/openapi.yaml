@@ -8028,6 +8028,65 @@ paths:
       summary: Switch a logical AO session to another agent harness
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/timeline:
+    get:
+      operationId: getSessionTimeline
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Maximum number of transition records to return. Defaults to 100.
+        in: query
+        name: limit
+        schema:
+          default: 100
+          description: Maximum number of transition records to return. Defaults to
+            100.
+          format: int64
+          maximum: 500
+          minimum: 1
+          type: integer
+      - description: Pagination offset.
+        in: query
+        name: offset
+        schema:
+          default: 0
+          description: Pagination offset.
+          format: int64
+          minimum: 0
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionTimelineResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Get session status timeline
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/workspace/diffs:
     post:
       operationId: getSessionWorkspaceDiffs
@@ -14758,6 +14817,84 @@ components:
       - tool
       - startedAt
       - failed
+      type: object
+    SessionTimelineItemResponse:
+      properties:
+        createdAt:
+          description: Record creation timestamp.
+          format: date-time
+          type: string
+        durationMs:
+          description: Duration spent in this status in milliseconds (null if active).
+          type:
+          - "null"
+          - integer
+        endedAt:
+          description: Timestamp when this status ended (null if active).
+          format: date-time
+          type:
+          - "null"
+          - string
+        fromStatus:
+          description: Previous status (null if first transition).
+          type:
+          - "null"
+          - string
+        id:
+          description: Transition record ID.
+          type: string
+        metadata:
+          description: Structured metadata associated with transition.
+        reason:
+          description: Human-readable reason or error summary.
+          type:
+          - "null"
+          - string
+        sessionId:
+          description: Session ID.
+          type: string
+        startedAt:
+          description: Timestamp when this status started.
+          format: date-time
+          type: string
+        toStatus:
+          description: New status.
+          type: string
+        triggerSource:
+          description: 'Trigger source: agent, user, scm_ci, scm_review, or system.'
+          type: string
+      required:
+      - id
+      - sessionId
+      - toStatus
+      - triggerSource
+      - startedAt
+      - createdAt
+      type: object
+    SessionTimelineResponse:
+      properties:
+        items:
+          description: Chronological list of status transitions.
+          items:
+            $ref: '#/components/schemas/SessionTimelineItemResponse'
+          type: array
+        limit:
+          description: Maximum items requested.
+          format: int64
+          type: integer
+        offset:
+          description: Pagination offset.
+          format: int64
+          type: integer
+        total:
+          description: Total number of transitions for this session.
+          format: int64
+          type: integer
+      required:
+      - total
+      - limit
+      - offset
+      - items
       type: object
     SessionUsageResponse:
       properties:

@@ -17,6 +17,7 @@ import { sessionScmSummaryQueryKey } from "../hooks/useSessionScmSummary";
 import { settingsQueryKey } from "../hooks/useSettings";
 import { sessionWorkspaceFilesQueryKey } from "../hooks/useSessionWorkspaceFiles";
 import { sessionInterfaceTransitionQueryKey } from "../hooks/useSessionInterfaceTransition";
+import { sessionTimelineQueryKey } from "../hooks/useSessionStatusTimeline";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { agentReadiness } from "../test/agent-readiness-fixtures";
 import { useUiStore } from "../stores/ui-store";
@@ -250,6 +251,12 @@ function commonGetsResponder(
     }
     if (path === "/api/v1/sessions/{sessionId}/reviews") {
       return { data: { reviewerHandleId, reviewerActivityState, reviews } };
+    }
+    if (path === "/api/v1/sessions/{sessionId}/timeline") {
+      return {
+        data: { total: 0, limit: 100, offset: 0, items: [] },
+        error: undefined,
+      };
     }
     if (path === "/api/v1/projects/{id}") {
       return {
@@ -2272,7 +2279,110 @@ describe("SessionInspector Activity section", () => {
       "Created workspace3h ago",
       "Draft PR #424h ago",
     ]);
+  });
 
+  it("renders historical status transitions with status badges, trigger icons, duration, and tooltips", () => {
+    const transitions = [
+      {
+        id: "trans-1",
+        sessionId: "sess-1",
+        fromStatus: null,
+        toStatus: "active",
+        triggerSource: "agent",
+        reason: "Agent started working on task",
+        metadata: { file: "main.go" },
+        startedAt: "2026-06-15T10:00:00Z",
+        endedAt: "2026-06-15T10:30:00Z",
+        durationMs: 1800000,
+        createdAt: "2026-06-15T10:00:00Z",
+      },
+      {
+        id: "trans-2",
+        sessionId: "sess-1",
+        fromStatus: "working",
+        toStatus: "idle",
+        triggerSource: "user",
+        reason: "User paused session",
+        metadata: null,
+        startedAt: "2026-06-15T11:00:00Z",
+        endedAt: null,
+        durationMs: null,
+        createdAt: "2026-06-15T11:00:00Z",
+      },
+    ];
+
+    renderWithQuery(
+      <SessionInspector
+        session={session([], {
+          id: "sess-1",
+          status: "idle",
+          createdAt: "2026-06-15T09:00:00Z",
+          updatedAt: "2026-06-15T11:00:00Z",
+        })}
+      />,
+      undefined,
+      (client) => {
+        client.setQueryData(sessionTimelineQueryKey("sess-1"), {
+          total: 2,
+          limit: 100,
+          offset: 0,
+          items: transitions,
+        });
+      },
+    );
+
+    const section = screen
+      .getByText("Activity")
+      .closest("[data-testid='inspector-section']") as HTMLElement;
+
+    expect(within(section).getByText("Working")).toBeInTheDocument();
+    expect(within(section).getByLabelText("Agent")).toBeInTheDocument();
+    expect(within(section).getByLabelText("User")).toBeInTheDocument();
+    expect(within(section).getByText("30m")).toBeInTheDocument();
+    expect(within(section).getByText(/Running \(/)).toBeInTheDocument();
+    expect(within(section).getByText("Agent started working on task")).toBeInTheDocument();
+  });
+
+  it("shows load more button when total transitions exceed loaded items", () => {
+    const transitions = [
+      {
+        id: "trans-1",
+        sessionId: "sess-1",
+        fromStatus: null,
+        toStatus: "working",
+        triggerSource: "agent",
+        startedAt: "2026-06-15T10:00:00Z",
+        endedAt: "2026-06-15T10:30:00Z",
+        durationMs: 1800000,
+        createdAt: "2026-06-15T10:00:00Z",
+      },
+    ];
+
+    renderWithQuery(
+      <SessionInspector
+        session={session([], {
+          id: "sess-1",
+          status: "working",
+          createdAt: "2026-06-15T09:00:00Z",
+          updatedAt: "2026-06-15T11:00:00Z",
+        })}
+      />,
+      undefined,
+      (client) => {
+        client.setQueryData(sessionTimelineQueryKey("sess-1"), {
+          total: 105,
+          limit: 100,
+          offset: 0,
+          items: transitions,
+        });
+      },
+    );
+
+    const section = screen
+      .getByText("Activity")
+      .closest("[data-testid='inspector-section']") as HTMLElement;
+
+    expect(within(section).getByRole("button", { name: "Load all transitions (104 remaining)" })).toBeInTheDocument();
   });
 });
 

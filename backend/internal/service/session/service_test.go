@@ -80,6 +80,10 @@ type fakeStore struct {
 	comments            map[string][]domain.PullRequestComment
 	commentsErr         error
 	reviewRuns          map[domain.SessionID][]domain.CurrentHeadReviewRun
+	transitions         map[domain.SessionID][]domain.SessionStatusTransition
+	listTransitionsErr  error
+	lastTimelineLimit   int64
+	lastTimelineOffset  int64
 	listPRFactsCalls    int
 	listReviewRunsCalls int
 	num                 int
@@ -100,11 +104,61 @@ func newFakeStore() *fakeStore {
 		threads:        map[string][]domain.PullRequestReviewThread{},
 		comments:       map[string][]domain.PullRequestComment{},
 		reviewRuns:     map[domain.SessionID][]domain.CurrentHeadReviewRun{},
+		transitions:    map[domain.SessionID][]domain.SessionStatusTransition{},
 	}
 }
 
 func (f *fakeStore) ListWorkspaceRepos(context.Context, string) ([]domain.WorkspaceRepoRecord, error) {
 	return nil, nil
+}
+
+func (f *fakeStore) ListSessionStatusTransitions(_ context.Context, sessionID domain.SessionID, limit, offset int64) ([]domain.SessionStatusTransition, int64, error) {
+	f.lastTimelineLimit = limit
+	f.lastTimelineOffset = offset
+	if f.listTransitionsErr != nil {
+		return nil, 0, f.listTransitionsErr
+	}
+	all := f.transitions[sessionID]
+	total := int64(len(all))
+	if offset >= total {
+		return []domain.SessionStatusTransition{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
+}
+
+func TestListTransitionsValidatesSessionAndPagination(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
+	st.transitions["mer-1"] = []domain.SessionStatusTransition{
+		{ID: "t1", SessionID: "mer-1", ToStatus: "idle"},
+		{ID: "t2", SessionID: "mer-1", ToStatus: "active"},
+	}
+	svc := &Service{store: st}
+
+	items, total, err := svc.ListTransitions(context.Background(), "mer-1", 999, -5)
+	if err != nil {
+		t.Fatalf("ListTransitions: %v", err)
+	}
+	if total != 2 || len(items) != 2 {
+		t.Fatalf("ListTransitions returned len=%d total=%d, want len=2 total=2", len(items), total)
+	}
+	if st.lastTimelineLimit != 500 || st.lastTimelineOffset != 0 {
+		t.Fatalf("store pagination = limit %d offset %d, want 500/0", st.lastTimelineLimit, st.lastTimelineOffset)
+	}
+}
+
+func TestListTransitionsMissingSession(t *testing.T) {
+	st := newFakeStore()
+	svc := &Service{store: st}
+
+	_, _, err := svc.ListTransitions(context.Background(), "missing", 100, 0)
+	if !errors.Is(err, ports.ErrSessionNotFound) {
+		t.Fatalf("ListTransitions error = %v, want ErrSessionNotFound", err)
+	}
 }
 
 func TestListBatchesKanbanReads(t *testing.T) {
