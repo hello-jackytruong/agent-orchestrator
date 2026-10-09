@@ -315,6 +315,21 @@ describe("GlobalSettingsForm", () => {
 		expect(useLocaleStore.getState().locale).toBe("zh-CN");
 	});
 
+	it("switches settings labels to Vietnamese and persists locale", async () => {
+		const user = userEvent.setup();
+		renderForm();
+		expect(await screen.findByLabelText("Settings")).toBeInTheDocument();
+
+		await user.click(screen.getByLabelText("Language"));
+		await user.click(await screen.findByRole("menuitem", { name: "Tiếng Việt" }));
+
+		await waitFor(() => expect(setUiSettings).toHaveBeenCalledWith({ locale: "vi" }));
+		await waitFor(() => expect(screen.getByText("Ngôn ngữ")).toBeInTheDocument());
+		expect(screen.getAllByText("Giao diện").length).toBeGreaterThan(0);
+		expect(document.documentElement.lang).toBe("vi");
+		expect(useLocaleStore.getState().locale).toBe("vi");
+	});
+
 	it("toggles sound notifications on and persists the change", async () => {
 		const user = userEvent.setup();
 		renderForm();

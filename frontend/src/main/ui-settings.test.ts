@@ -38,6 +38,8 @@ describe("ui-settings", () => {
 
 		await writeUiSettings(dir, { locale: "ja" });
 		expect(await readUiSettings(dir)).toEqual({ ...DEFAULT_UI_SETTINGS, locale: "ja", soundNotificationsEnabled: false });
+		await writeUiSettings(dir, { locale: "vi" });
+		expect(await readUiSettings(dir)).toEqual({ ...DEFAULT_UI_SETTINGS, locale: "vi", soundNotificationsEnabled: false });
 	});
 
 	it("falls back to defaults on garbage", async () => {
@@ -53,6 +55,7 @@ describe("ui-settings", () => {
 		expect(coerceUiSettings({ locale: "zh-CN" })).toEqual({ ...DEFAULT_UI_SETTINGS, locale: "zh-CN" });
 		expect(coerceUiSettings({ locale: "fr" })).toEqual({ ...DEFAULT_UI_SETTINGS, locale: "fr" });
 		expect(coerceUiSettings({ locale: "pt-BR" })).toEqual({ ...DEFAULT_UI_SETTINGS, locale: "pt-BR" });
+		expect(coerceUiSettings({ locale: "vi" })).toEqual({ ...DEFAULT_UI_SETTINGS, locale: "vi" });
 	});
 
 	it("merges the terminal shell without resetting other UI settings", async () => {
