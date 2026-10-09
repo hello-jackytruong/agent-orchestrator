@@ -123,8 +123,8 @@ func TestAgentPlansCoverEveryHarnessOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plans) != 33 {
-		t.Fatalf("got %d plans, want 33", len(plans))
+	if len(plans) != 35 {
+		t.Fatalf("got %d plans, want 35", len(plans))
 	}
 	seen := make(map[string]bool, len(plans))
 	for _, plan := range plans {
@@ -216,6 +216,7 @@ func TestAgentPlanSelectsAvailableFallback(t *testing.T) {
 		{"codex npm", "linux", TargetCodex, []string{"npm"}, "npm", "npm install -g @openai/codex"},
 		{"copilot winget", "windows", TargetCopilot, []string{"winget", "npm"}, "winget", "winget install -e --id GitHub.Copilot --silent --accept-package-agreements --accept-source-agreements --disable-interactivity"},
 		{"vibe pipx", "linux", TargetVibe, []string{"pipx"}, "pipx", "pipx install mistral-vibe"},
+		{"openhands uv", "windows", TargetOpenHands, []string{"uv"}, "uv", "uv tool install openhands"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -677,5 +678,18 @@ func TestAgentTargetsAreValidButPrerequisitesAreNotHarnessRows(t *testing.T) {
 		if !Valid(target) || IsAgentTarget(target) {
 			t.Fatalf("prerequisite target %q was classified incorrectly", target)
 		}
+	}
+}
+
+func TestCodewhaleInstallPlanIsManualOnly(t *testing.T) {
+	plan := newTestService("darwin", "brew", "npm", "sh").planAgent(TargetCodewhale)
+	if !plan.Unsupported || plan.Method != "manual" || len(plan.Command) != 0 || plan.Script != nil {
+		t.Fatalf("Codewhale plan = %+v, want command-free manual plan", plan)
+	}
+	if plan.DocsURL != "https://github.com/Hmbown/Codewhale" {
+		t.Fatalf("Codewhale documentation URL = %q", plan.DocsURL)
+	}
+	if !strings.Contains(plan.Reason, "does not automatically install Codewhale") {
+		t.Fatalf("Codewhale reason = %q", plan.Reason)
 	}
 }
