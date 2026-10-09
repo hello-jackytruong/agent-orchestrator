@@ -88,7 +88,7 @@ func (s *Store) GetLatestSessionStatusTransition(ctx context.Context, sessionID 
 	return transitionRowToDomain(row), true, nil
 }
 
-// ListSessionStatusTransitions returns a paginated list of transitions ordered chronologically.
+// ListSessionStatusTransitions returns a paginated list of transitions ordered newest first.
 func (s *Store) ListSessionStatusTransitions(ctx context.Context, sessionID domain.SessionID, limit, offset int64) ([]domain.SessionStatusTransition, int64, error) {
 	total, err := s.qr.CountSessionStatusTransitions(ctx, string(sessionID))
 	if err != nil {
