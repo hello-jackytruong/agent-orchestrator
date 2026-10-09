@@ -5,19 +5,17 @@ description: Test a pull request or reproduce an issue in an isolated target app
 
 # Test a pull request or issue
 
-Before testing, list the skills and docs available in this repository and in
-AO, then read and use the relevant ones. Include the repo's guidance for
-running or launching the app and any diagnostics or triage skill for
-gathering evidence.
-
-For a PR, complete the diff review below before designing the scenario.
+For a PR, code review is the mandatory FIRST step, before any app launch.
+Complete the steps below and save the review artifact before starting the
+target. If the target is already running, complete this review before any
+UI action or scenario setup.
 Run the recorded scenario on the PR base, then on its latest head in dev mode,
 using matching setup, UI actions and capture points. Retain both exact SHAs.
 For an issue, read it and its comments, then reproduce it on current code.
 
 ## Review the diff first
 
-These steps are mandatory before app testing:
+These steps are mandatory before launching or using the app for a PR:
 
 1. Run `gh auth status`.
 2. Run `gh pr view <pr> --json title,body,comments,reviews,baseRefOid,headRefOid,files`
@@ -25,19 +23,31 @@ These steps are mandatory before app testing:
 3. Run `gh pr diff <pr>`. Read the changed files and their callers, following
    the changed behavior through the code.
 4. Run `gh pr checks <pr>` to read existing CI results.
-5. Write an artifact describing what changed, the exact PR trigger and how
-   to reach it. Then design the scenario steps and matching capture points.
+5. Write an artifact stating what the PR changes, the likely trigger and its
+   preconditions, expected behavior, and how to reach it in the UI. Record
+   any unverified preconditions. Design the numbered scenario steps and
+   matching capture points from that analysis.
+
+Before testing, list the skills and docs available in this repository and in
+AO, then read and use the relevant ones. Include the repo's guidance for
+running or launching the app and any diagnostics or triage skill for
+gathering evidence.
 
 Use sequential base and head attempts through the existing `ao testing start`
 CLI. Share the warm checkout and recorded scenario, waiting for base cleanup
 before starting head. Pass the leg, exact SHA and shared artifact paths through
 `--prompt-file`. An investigator already bound to a target runs only its
 assigned leg; it must not start another attempt while that target is running.
-The base investigator retains its scenario, fixture
-instructions and evidence for the head investigator. The head investigator
-uses those artifacts to prepare ONE combined review; do not publish separate
-baseline feedback. If either leg or the recorded trigger is missing, report
-`partial` and state the missing evidence.
+The base investigator includes its scenario as exact numbered steps and inputs,
+fixture instructions and capture points in the Markdown passed to
+`submit_report`. This stores them in the run's retained evidence before cleanup.
+Pass its run/attempt IDs and retained report path to the head investigator,
+which must read that report and replay the same steps and inputs verbatim.
+After the head attempt completes, run the final review once, using retained
+media from both attempts in ONE combined side-by-side preview; do not publish
+separate baseline feedback. If the base never reaches the PR trigger, state
+that fact and mark the comparison `partial`, never fixed. If either leg or
+scenario step is missing, report `partial` and state the missing evidence.
 
 ## Run the recorded scenario
 
@@ -87,14 +97,17 @@ draft GitHub comment. Record the actual model, tokens, cost and elapsed time.
 Mark unavailable usage or cost as unknown rather than estimating it without
 a source.
 
-The final review must include actionable file:line findings, or explicitly
-say "no issues found" and list the changed files, callers and behavior checked.
+The final PR review must include actionable inline file:line findings in its
+review payload, or explicitly say "no issues found" and list the changed
+files, callers and behavior checked.
 Keep the code-review opinion separate from unverified runtime claims.
 
 ## Finish with an approved review or comment
 
 Use `submit_report` to save the verdict and finalize the target recording,
-then continue in this session. Wait for the retained recording and metadata
+then stop here for a PR base attempt. Continue once after the head attempt,
+using retained evidence from both attempts. For an issue, continue after its
+single attempt. Wait for the retained recording and metadata
 before exporting media. Keep publication files in the session artifact
 directory, outside the repository.
 
