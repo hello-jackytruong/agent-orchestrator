@@ -724,6 +724,7 @@
 	"inspector.timeline.loadAllTransitions": "Charger toutes les transitions ({{count}} restantes)",
 	"inspector.timeline.merged": "Fusionné",
 	"inspector.timeline.opened": "Ouvert",
+	"inspector.timeline.runningDuration": "En cours ({{duration}})",
 	"inspector.timeline.status.blocked": "Bloqué",
 	"inspector.timeline.status.ciFailed": "CI échouée",
 	"inspector.timeline.status.exited": "Sorti",

@@ -717,6 +717,7 @@
 	"inspector.timeline.loadAllTransitions": "加载全部状态变化（剩余 {{count}} 条）",
 	"inspector.timeline.merged": "已合并",
 	"inspector.timeline.opened": "已打开",
+	"inspector.timeline.runningDuration": "运行中（{{duration}}）",
 	"inspector.timeline.status.blocked": "已阻塞",
 	"inspector.timeline.status.ciFailed": "CI 失败",
 	"inspector.timeline.status.exited": "已退出",

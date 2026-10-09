@@ -132,3 +132,105 @@ func TestRecordTransition_LifecycleFlow(t *testing.T) {
 		t.Fatalf("unexpected terminal transition: %+v", trs[2])
 	}
 }
+
+func TestRuntimeObservation_WorkloadExitRecordsTransition(t *testing.T) {
+	store := newTransitionFakeStore()
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	m := New(store, nil)
+	m.clock = func() time.Time { return now }
+
+	sessID := domain.SessionID("sess-trans-workload-exit")
+	store.sessions[sessID] = domain.SessionRecord{
+		ID:       sessID,
+		Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: now.Add(-2 * time.Minute)},
+		Metadata: domain.SessionMetadata{
+			RuntimeLaunchID: "launch-1",
+		},
+	}
+	store.transitions[sessID] = []domain.SessionStatusTransition{{
+		ID:            "tr-active",
+		SessionID:     sessID,
+		ToStatus:      string(domain.ActivityActive),
+		TriggerSource: "agent",
+		StartedAt:     now.Add(-30 * time.Second),
+		CreatedAt:     now.Add(-30 * time.Second),
+	}}
+
+	observedAt := now.Add(5 * time.Second)
+	if err := m.ApplyRuntimeObservation(context.Background(), sessID, ports.RuntimeFacts{
+		Runtime:    ports.ProbeAlive,
+		Workload:   ports.ProbeDead,
+		LaunchID:   "launch-1",
+		ObservedAt: observedAt,
+	}); err != nil {
+		t.Fatalf("ApplyRuntimeObservation: %v", err)
+	}
+
+	trs := store.transitions[sessID]
+	if len(trs) != 2 {
+		t.Fatalf("expected workload exit transition, got %d transitions: %+v", len(trs), trs)
+	}
+	if trs[0].EndedAt == nil || !trs[0].EndedAt.Equal(observedAt) {
+		t.Fatalf("expected active transition closed at observation time, got %+v", trs[0])
+	}
+	if trs[1].ToStatus != string(domain.ActivityExited) || trs[1].TriggerSource != "system" {
+		t.Fatalf("unexpected workload exit transition: %+v", trs[1])
+	}
+	if trs[1].FromStatus == nil || *trs[1].FromStatus != string(domain.ActivityActive) {
+		t.Fatalf("workload exit transition from status = %v, want active", trs[1].FromStatus)
+	}
+	if !trs[1].StartedAt.Equal(observedAt) {
+		t.Fatalf("workload exit transition started_at = %s, want %s", trs[1].StartedAt, observedAt)
+	}
+}
+
+func TestRuntimeObservation_RuntimeDeathRecordsTransition(t *testing.T) {
+	store := newTransitionFakeStore()
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	m := New(store, nil)
+	m.clock = func() time.Time { return now }
+
+	sessID := domain.SessionID("sess-trans-runtime-death")
+	store.sessions[sessID] = domain.SessionRecord{
+		ID:       sessID,
+		Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: now.Add(-2 * time.Minute)},
+		Metadata: domain.SessionMetadata{
+			RuntimeLaunchID: "launch-1",
+		},
+	}
+	store.transitions[sessID] = []domain.SessionStatusTransition{{
+		ID:            "tr-active",
+		SessionID:     sessID,
+		ToStatus:      string(domain.ActivityActive),
+		TriggerSource: "agent",
+		StartedAt:     now.Add(-45 * time.Second),
+		CreatedAt:     now.Add(-45 * time.Second),
+	}}
+
+	observedAt := now.Add(10 * time.Second)
+	if err := m.ApplyRuntimeObservation(context.Background(), sessID, ports.RuntimeFacts{
+		Runtime:    ports.ProbeDead,
+		Workload:   ports.ProbeFailed,
+		LaunchID:   "launch-1",
+		ObservedAt: observedAt,
+	}); err != nil {
+		t.Fatalf("ApplyRuntimeObservation: %v", err)
+	}
+
+	trs := store.transitions[sessID]
+	if len(trs) != 2 {
+		t.Fatalf("expected runtime death transition, got %d transitions: %+v", len(trs), trs)
+	}
+	if trs[0].EndedAt == nil || !trs[0].EndedAt.Equal(observedAt) {
+		t.Fatalf("expected active transition closed at observation time, got %+v", trs[0])
+	}
+	if trs[1].ToStatus != "terminated" || trs[1].TriggerSource != "system" {
+		t.Fatalf("unexpected runtime death transition: %+v", trs[1])
+	}
+	if trs[1].FromStatus == nil || *trs[1].FromStatus != string(domain.ActivityActive) {
+		t.Fatalf("runtime death transition from status = %v, want active", trs[1].FromStatus)
+	}
+	if !trs[1].StartedAt.Equal(observedAt) {
+		t.Fatalf("runtime death transition started_at = %s, want %s", trs[1].StartedAt, observedAt)
+	}
+}

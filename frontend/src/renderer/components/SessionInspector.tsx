@@ -1717,7 +1717,9 @@ function ActivityTimeline({ hostId, prs, session }: { hostId?: string; prs: Sess
 		let durationText: string;
 		if (isActive) {
 			const elapsed = Math.max(0, now - Date.parse(item.startedAt));
-			durationText = `Running (${formatDurationCompact(elapsed)})`;
+			durationText = t("inspector.timeline.runningDuration", {
+				duration: formatDurationCompact(elapsed),
+			});
 		} else {
 			const duration = item.durationMs ?? (Date.parse(item.endedAt!) - Date.parse(item.startedAt));
 			durationText = formatDurationCompact(duration);
