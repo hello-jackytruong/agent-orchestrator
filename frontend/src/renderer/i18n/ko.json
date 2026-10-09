@@ -717,6 +717,7 @@
 	"inspector.timeline.loadAllTransitions": "모든 전환 불러오기 ({{count}}개 남음)",
 	"inspector.timeline.merged": "병합됨",
 	"inspector.timeline.opened": "열림",
+	"inspector.timeline.runningDuration": "실행 중 ({{duration}})",
 	"inspector.timeline.status.blocked": "차단됨",
 	"inspector.timeline.status.ciFailed": "CI 실패",
 	"inspector.timeline.status.exited": "종료됨",

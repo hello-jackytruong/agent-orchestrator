@@ -717,6 +717,7 @@
 	"inspector.timeline.loadAllTransitions": "Alle Übergänge laden ({{count}} verbleibend)",
 	"inspector.timeline.merged": "Gemerged",
 	"inspector.timeline.opened": "Geöffnet",
+	"inspector.timeline.runningDuration": "Läuft ({{duration}})",
 	"inspector.timeline.status.blocked": "Blockiert",
 	"inspector.timeline.status.ciFailed": "CI fehlgeschlagen",
 	"inspector.timeline.status.exited": "Beendet",

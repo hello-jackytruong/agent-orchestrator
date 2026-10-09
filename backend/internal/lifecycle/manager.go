@@ -480,8 +480,10 @@ func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.Session
 		terminationLaunch   string
 		terminationRevision int64
 		shouldTerminate     bool
+		workloadExited      bool
+		workloadExitedAt    time.Time
 	)
-	if err := m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
+	err := m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
 		if cur.IsTerminated || !matchesLaunch(cur) {
 			return cur, false
 		}
@@ -491,8 +493,11 @@ func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.Session
 				return cur, false
 			}
 			next := cur
-			next.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: timeOr(f.ObservedAt, now)}
+			observedAt := timeOr(f.ObservedAt, now)
+			next.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: observedAt}
 			delete(m.flights, id)
+			workloadExited = true
+			workloadExitedAt = observedAt
 			return next, true
 		}
 		if !runtimeClearlyDead(f, cur.Activity, now, m.window) {
@@ -506,14 +511,24 @@ func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.Session
 		terminationRevision = cur.Revision
 		shouldTerminate = true
 		return cur, false
-	}); err != nil || !shouldTerminate {
+	})
+	if err != nil {
 		return err
+	}
+	if workloadExited {
+		if err := m.recordTransition(ctx, id, string(domain.ActivityExited), "system", "Workload exited", nil, workloadExitedAt); err != nil {
+			return err
+		}
+	}
+	if !shouldTerminate {
+		return nil
 	}
 
 	finalizeSessionUsage(ctx, id, terminationLaunch, terminationRevision, finalizer)
 
 	terminated := false
-	err := m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
+	var terminatedAt time.Time
+	err = m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
 		if cur.IsTerminated || cur.Revision != terminationRevision ||
 			cur.Metadata.RuntimeLaunchID != terminationLaunch || !matchesLaunch(cur) ||
 			!runtimeClearlyDead(f, cur.Activity, now, m.window) || m.sessionMutationInProgress(id) {
@@ -521,7 +536,8 @@ func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.Session
 		}
 		next := cur
 		next.IsTerminated = true
-		next.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: timeOr(f.ObservedAt, now)}
+		terminatedAt = timeOr(f.ObservedAt, now)
+		next.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: terminatedAt}
 		// Reaper-driven death (crash/SIGKILL) never fires a session-end hook,
 		// so this is the last chance to release the session's tool-flight
 		// state; a leaked entry would otherwise persist for the daemon's life
@@ -536,6 +552,9 @@ func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.Session
 		return err
 	}
 	if terminated {
+		if err := m.recordTransition(ctx, id, "terminated", "system", "Runtime stopped", nil, terminatedAt); err != nil {
+			return err
+		}
 		// Route reaper-observed death through the same container-reap hook as
 		// every other terminal path (#2652): a crash/SIGKILL detected by the
 		// runtime reaper must not leave the session's Docker containers behind

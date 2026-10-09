@@ -717,6 +717,7 @@
 	"inspector.timeline.loadAllTransitions": "すべての遷移を読み込む（残り {{count}} 件）",
 	"inspector.timeline.merged": "マージ済み",
 	"inspector.timeline.opened": "オープン",
+	"inspector.timeline.runningDuration": "実行中 ({{duration}})",
 	"inspector.timeline.status.blocked": "ブロック中",
 	"inspector.timeline.status.ciFailed": "CI 失敗",
 	"inspector.timeline.status.exited": "終了",
