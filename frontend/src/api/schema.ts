@@ -3031,6 +3031,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/usage/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get range-based token and estimated cost analytics */
+        get: operations["getUsageAnalytics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage/memory/pressure": {
         parameters: {
             query?: never;
@@ -5593,6 +5610,69 @@ export interface components {
             content: string;
             expectedFileFingerprint: string;
             path: string;
+        };
+        UsageAnalyticsBucketResponse: {
+            /** Format: date-time */
+            end: string;
+            /** Format: int64 */
+            eventCount: number;
+            /** Format: date-time */
+            start: string;
+            totals: components["schemas"]["UsageTotalsResponse"];
+        };
+        UsageAnalyticsCoverageResponse: {
+            /** Format: int64 */
+            eventCount: number;
+            /** Format: int64 */
+            incompleteSessionCount: number;
+            /** Format: int64 */
+            partialSourceCount: number;
+            /** Format: int64 */
+            pricedEventCount: number;
+            /** Format: int64 */
+            sessionCount: number;
+            /** Format: int64 */
+            sourceCount: number;
+            supportedSources: string[];
+            /** Format: int64 */
+            unpricedEventCount: number;
+        };
+        UsageAnalyticsHarnessResponse: {
+            /** Format: int64 */
+            eventCount: number;
+            harness: string;
+            totals: components["schemas"]["UsageTotalsResponse"];
+        };
+        UsageAnalyticsModelResponse: {
+            /** Format: int64 */
+            eventCount: number;
+            harness: string;
+            modelId: string;
+            totals: components["schemas"]["UsageTotalsResponse"];
+        };
+        UsageAnalyticsProjectResponse: {
+            /** Format: int64 */
+            eventCount: number;
+            projectId: string;
+            projectName: string;
+            totals: components["schemas"]["UsageTotalsResponse"];
+        };
+        UsageAnalyticsResponse: {
+            coverage: components["schemas"]["UsageAnalyticsCoverageResponse"];
+            dailyBuckets: components["schemas"]["UsageAnalyticsBucketResponse"][];
+            /** Format: date-time */
+            end: string;
+            /** @enum {string} */
+            granularity: "hour" | "day" | "week";
+            harnesses: components["schemas"]["UsageAnalyticsHarnessResponse"][];
+            hourlyBuckets: components["schemas"]["UsageAnalyticsBucketResponse"][];
+            models: components["schemas"]["UsageAnalyticsModelResponse"][];
+            projects: components["schemas"]["UsageAnalyticsProjectResponse"][];
+            /** Format: date-time */
+            start: string;
+            timeSeries: components["schemas"]["UsageAnalyticsBucketResponse"][];
+            timezone: string;
+            totals: components["schemas"]["UsageTotalsResponse"];
         };
         UsageHarnessResponse: {
             harness: string;
@@ -17378,6 +17458,64 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getUsageAnalytics: {
+        parameters: {
+            query?: {
+                projectId?: string;
+                harness?: string;
+                modelId?: string;
+                /** @description Inclusive RFC3339 instant or YYYY-MM-DD local date. */
+                start?: string;
+                /** @description Exclusive RFC3339 instant or YYYY-MM-DD local date. */
+                end?: string;
+                /** @description IANA timezone used for local day and week buckets. */
+                timezone?: string;
+                granularity?: "hour" | "day" | "week";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageAnalyticsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
             };
             /** @description Internal Server Error */
             500: {
