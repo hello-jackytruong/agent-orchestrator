@@ -16,6 +16,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
 	AlertTriangle,
 	Archive,
+	BarChart3,
 	CalendarClock,
 	ChevronRight,
 	Download,
@@ -525,6 +526,7 @@ function useSelection() {
 	});
 	const goHome = useCallback(() => void navigate({ to: "/" }), [navigate]);
 	const goAutomations = useCallback(() => void navigate({ to: "/automations" }), [navigate]);
+	const goAnalytics = useCallback(() => void navigate({ to: "/analytics" }), [navigate]);
 	const goStandaloneBoard = useCallback(() => void navigate({ to: "/sessions" }), [navigate]);
 	const goGlobalSettings = useCallback(() => openGlobalSettings(), [openGlobalSettings]);
 	const goConnectMobile = useCallback(() => openGlobalSettings("mobile"), [openGlobalSettings]);
@@ -549,6 +551,7 @@ function useSelection() {
 	return useMemo(() => ({
 		isHome: pathname === "/",
 		isAutomations: pathname === "/automations",
+		isAnalytics: pathname === "/analytics",
 		activeRemoteHostId: params.hostId,
 		activeRemoteProjectId: params.hostId ? params.projectId : undefined,
 		activeRemoteSessionId: params.hostId ? params.sessionId : undefined,
@@ -556,6 +559,7 @@ function useSelection() {
 		activeSessionId: params.hostId ? undefined : params.sessionId,
 		goHome,
 		goAutomations,
+		goAnalytics,
 		goStandaloneBoard,
 		// Settings is a modal — open it in place so the current page (session
 		// terminal, board, etc.) stays underneath.
@@ -564,7 +568,7 @@ function useSelection() {
 		goSettings,
 		goProject,
 		goSession,
-	}), [goAutomations, goConnectMobile, goGlobalSettings, goHome, goProject, goSession, goSettings, goStandaloneBoard, params.hostId, params.projectId, params.sessionId, pathname]);
+	}), [goAnalytics, goAutomations, goConnectMobile, goGlobalSettings, goHome, goProject, goSession, goSettings, goStandaloneBoard, params.hostId, params.projectId, params.sessionId, pathname]);
 }
 
 // Colour tracks the session's board section, preserving SCM state while the
@@ -970,6 +974,15 @@ export function Sidebar({
 					</SidebarGroup>
 				) : null}
 				<SidebarMenu className="mb-3 gap-0.5 group-data-[collapsible=icon]:gap-1">
+					<SidebarMenuItem>
+						<SidebarTopNavRow
+							active={selection.isAnalytics}
+							icon={<BarChart3 aria-hidden="true" />}
+							label={t("usageAnalytics.nav")}
+							onClick={selection.goAnalytics}
+							tooltip={isCollapsed ? t("usageAnalytics.nav") : undefined}
+						/>
+					</SidebarMenuItem>
 					<SidebarMenuItem>
 						<SidebarTopNavRow
 							active={selection.isAutomations}
