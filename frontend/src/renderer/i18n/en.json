@@ -2689,6 +2689,7 @@
 	"usageAnalytics.error": "Could not load usage analytics.",
 	"usageAnalytics.unknown": "Unknown",
 	"usageAnalytics.unknownModel": "Unknown model",
+	"usageAnalytics.standaloneProject": "Standalone sessions",
 	"usageAnalytics.unavailable": "Unavailable",
 	"usageAnalytics.processed": "Processed tokens",
 	"usageAnalytics.processedDetail": "Known canonical usage facts",

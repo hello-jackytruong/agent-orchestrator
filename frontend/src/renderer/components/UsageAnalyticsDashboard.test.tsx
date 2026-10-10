@@ -14,7 +14,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../hooks/useWorkspaceQuery", () => ({
 	useWorkspaceQuery: () => ({
-		data: [{ id: "project-1", name: "Demo project" }],
+		data: [
+			{ id: "project-1", name: "Demo project" },
+			{ id: "cloud-project", name: "Cloud project" },
+		],
 	}),
 }));
 
@@ -115,6 +118,12 @@ const analytics: UsageAnalytics = {
 			projectName: "Demo project",
 			totals: totals(1800),
 		},
+		{
+			eventCount: 1,
+			projectId: "",
+			projectName: "",
+			totals: totals(0),
+		},
 	],
 	start: "2026-01-05T00:00:00Z",
 	timeSeries: [
@@ -182,5 +191,17 @@ describe("UsageAnalyticsDashboard", () => {
 				granularity: "hour",
 			});
 		});
+	});
+
+	it("limits the project filter to local analytics project summaries", async () => {
+		const user = userEvent.setup();
+		renderDashboard();
+
+		await user.click(screen.getAllByRole("combobox")[1]);
+
+		expect(screen.getByRole("option", { name: "Demo project" })).toBeInTheDocument();
+		expect(screen.queryByRole("option", { name: "Cloud project" })).not.toBeInTheDocument();
+		expect(screen.queryByRole("option", { name: "Standalone sessions" })).not.toBeInTheDocument();
+		expect(screen.getByText("Standalone sessions")).toBeInTheDocument();
 	});
 });
