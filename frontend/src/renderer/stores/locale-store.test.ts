@@ -34,11 +34,11 @@ describe("locale-store", () => {
 	});
 
 	it("loads persisted locale from the main process", async () => {
-		getUiSettings.mockResolvedValue({ locale: "zh-CN" });
+		getUiSettings.mockResolvedValue({ locale: "vi" });
 		await useLocaleStore.getState().load();
-		expect(useLocaleStore.getState().locale).toBe("zh-CN");
-		expect(appI18n.t("settings.general")).toBe("通用");
-		expect(document.documentElement.lang).toBe("zh-CN");
+		expect(useLocaleStore.getState().locale).toBe("vi");
+		expect(appI18n.t("settings.general")).toBe("Chung");
+		expect(document.documentElement.lang).toBe("vi");
 		expect(document.documentElement.dir).toBe("ltr");
 		expect(useLocaleStore.getState().loaded).toBe(true);
 	});

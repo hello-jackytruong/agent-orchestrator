@@ -9,6 +9,7 @@ import {
 	jaMessages,
 	koMessages,
 	ptBRMessages,
+	viMessages,
 	zhCNMessages,
 } from "./messages";
 
@@ -21,6 +22,7 @@ const allCatalogs = {
 	fr: frMessages,
 	de: deMessages,
 	"pt-BR": ptBRMessages,
+	vi: viMessages,
 } as const;
 
 function emptyCatalogs(): TranslationCatalogs {
@@ -37,6 +39,7 @@ describe("coerceLocale", () => {
 		expect(coerceLocale("fr")).toBe("fr");
 		expect(coerceLocale("de")).toBe("de");
 		expect(coerceLocale("pt-BR")).toBe("pt-BR");
+		expect(coerceLocale("vi")).toBe("vi");
 	});
 
 	it("defaults unknown values to en", () => {
@@ -61,6 +64,8 @@ describe("app i18next instance", () => {
 		expect(createAppI18n().t("settings.general")).toBe("General");
 		expect(createAppI18n("zh-CN").t("settings.general")).toBe("通用");
 		expect(createAppI18n("zh-CN").t("settings.language.zhCN")).toBe("简体中文");
+		expect(createAppI18n("vi").t("settings.general")).toBe("Chung");
+		expect(createAppI18n("vi").t("settings.language.vi")).toBe("Tiếng Việt");
 	});
 
 	it("resolves native language labels for every supported locale", () => {
@@ -73,6 +78,7 @@ describe("app i18next instance", () => {
 			fr: "settings.language.fr",
 			de: "settings.language.de",
 			"pt-BR": "settings.language.ptBR",
+			vi: "settings.language.vi",
 		} as const;
 		const expected = {
 			en: "English",
@@ -83,6 +89,7 @@ describe("app i18next instance", () => {
 			fr: "Français",
 			de: "Deutsch",
 			"pt-BR": "Português (Brasil)",
+			vi: "Tiếng Việt",
 		} as const;
 		for (const locale of APP_LOCALES) {
 			expect(createAppI18n(locale).t(labels[locale])).toBe(expected[locale]);
