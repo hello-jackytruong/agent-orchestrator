@@ -607,8 +607,26 @@ func (s *Service) Start(ctx context.Context, cfg StartConfig) (*Controller, erro
 	if cfg.ProviderConversationID != "" && providerHandleOwnedByActiveBranch {
 		if activeBranch.ProviderConversationID != "" &&
 			activeBranch.ProviderConversationID != cfg.ProviderConversationID {
-			return nil, fmt.Errorf("active conversation branch provider handle %q does not match session handle %q",
-				activeBranch.ProviderConversationID, cfg.ProviderConversationID)
+			// Older project rebinding could leave the predecessor's branch active
+			// even after the new orchestrator had started its own native thread.
+			// Recover that proven ownership change as a provider boundary instead
+			// of making every subsequent resume fail on the stale branch handle.
+			if cfg.Kind == domain.KindOrchestrator && conversation.Scope == domain.ConversationScopeProject &&
+				conversation.SessionID == cfg.SessionID && activeBranch.SessionID != cfg.SessionID && s.sessions != nil {
+				previous, found, readErr := s.sessions.GetSession(ctx, activeBranch.SessionID)
+				if readErr != nil {
+					return nil, fmt.Errorf("read previous project chat owner: %w", readErr)
+				}
+				if found && previous.IsTerminated && previous.ProjectID == cfg.ProjectID {
+					providerBoundaryID = s.newID()
+					providerScopeID = providerBoundaryID
+					providerHandleOwnedByActiveBranch = false
+				}
+			}
+			if providerHandleOwnedByActiveBranch {
+				return nil, fmt.Errorf("active conversation branch provider handle %q does not match session handle %q",
+					activeBranch.ProviderConversationID, cfg.ProviderConversationID)
+			}
 		}
 	}
 	// Conversation settings are durable user choices. Restore the selected
