@@ -1019,7 +1019,7 @@ const listUsageAnalyticsHourlyAggregates = `-- name: ListUsageAnalyticsHourlyAgg
 SELECT
     mue.created_at AS bucket_at,
     s.project_id,
-    COALESCE(NULLIF(p.display_name, ''), s.project_id) AS project_name,
+    COALESCE(NULLIF(p.display_name, ''), s.project_id, '') AS project_name,
     ub.harness,
     mue.model_id,
     CAST(COUNT(*) AS INTEGER) AS event_count,
@@ -1053,7 +1053,7 @@ SELECT
 FROM model_usage_events mue
 JOIN usage_bindings ub ON ub.id = mue.binding_id
 JOIN sessions s ON s.id = ub.session_id
-JOIN projects p ON p.id = s.project_id
+LEFT JOIN projects p ON p.id = s.project_id
 WHERE mue.created_at >= ?1
   AND mue.created_at < ?2
   AND (?3 = '' OR s.project_id = ?3)

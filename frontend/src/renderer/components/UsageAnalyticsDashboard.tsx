@@ -18,7 +18,6 @@ import {
 	type UsageAnalyticsBucket,
 	type UsageAnalyticsParams,
 } from "../hooks/useUsageAnalytics";
-import { useWorkspaceQuery } from "../hooks/useWorkspaceQuery";
 import { formatEstimatedCost, formatCostNanos } from "../lib/format-cost";
 import { formatTokenCount } from "../lib/format-token-count";
 import { cn } from "../lib/utils";
@@ -539,7 +538,10 @@ function ComparisonTable({ data }: { data: UsageAnalytics }) {
 	const { t } = useTranslation();
 	const rows = data.projects.map((project) => ({
 		id: project.projectId,
-		name: project.projectName || project.projectId,
+		name:
+			project.projectName ||
+			project.projectId ||
+			t("usageAnalytics.standaloneProject"),
 		tokens: project.totals.processedTokens,
 		cost: project.totals.estimatedCost?.totalNanos ?? null,
 		share:
@@ -714,7 +716,6 @@ export function UsageAnalyticsDashboard() {
 	const [granularity, setGranularity] = useState<"hour" | "day" | "week">(
 		"day",
 	);
-	const workspaces = useWorkspaceQuery().data ?? [];
 	const range = dateRangeForPreset(preset, customStart, customEnd);
 	const params: UsageAnalyticsParams = {
 		start: range.start,
@@ -741,6 +742,16 @@ export function UsageAnalyticsDashboard() {
 					data?.harnesses.map((row) => row.harness).filter(Boolean) ?? [],
 				),
 			).sort(),
+		[data],
+	);
+	const projectOptions = useMemo(
+		() =>
+			data?.projects
+				.filter((project) => project.projectId)
+				.map((project) => ({
+					id: project.projectId,
+					name: project.projectName || project.projectId,
+				})) ?? [],
 		[data],
 	);
 	const selectDay = (dateKeyValue: string) => {
@@ -835,9 +846,9 @@ export function UsageAnalyticsDashboard() {
 										<SelectItem value="all">
 											{t("usageAnalytics.allProjects")}
 										</SelectItem>
-										{workspaces.map((workspace) => (
-											<SelectItem key={workspace.id} value={workspace.id}>
-												{workspace.name}
+										{projectOptions.map((project) => (
+											<SelectItem key={project.id} value={project.id}>
+												{project.name}
 											</SelectItem>
 										))}
 									</SelectContent>

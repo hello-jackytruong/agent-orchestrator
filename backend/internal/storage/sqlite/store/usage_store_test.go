@@ -1803,6 +1803,46 @@ func TestUsageAnalyticsAggregatesFilterByRangeProjectHarnessAndModel(t *testing.
 	}
 }
 
+func TestUsageAnalyticsIncludesStandaloneSessionsInEventScope(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	rec := sampleRecord("")
+	rec.Harness = domain.HarnessCodex
+	standaloneSession, err := s.CreateSession(ctx, rec)
+	mustNoError(t, err, "create standalone session")
+
+	source := seedUsageSource(t, s, standaloneSession, now)
+	event := usageEvent("standalone-1", canonicalUsageTokens(10, 2, 8, 3))
+	event.CreatedAt = now
+	if err := s.ApplyUsageChunk(ctx, source.ID, 0, source.UpdatedAt, domain.SourceCursorState{
+		ByteOffset: 10, State: domain.UsageSourceComplete, UpdatedAt: now,
+	}, []domain.ModelUsageEvent{event}); err != nil {
+		t.Fatalf("apply standalone analytics event: %v", err)
+	}
+
+	filter := domain.UsageAnalyticsFilter{
+		Start: now.Add(-time.Hour),
+		End:   now.Add(time.Hour),
+	}
+	rows, err := s.ListUsageAnalyticsHourlyAggregates(ctx, filter)
+	mustNoError(t, err, "list standalone analytics aggregates")
+	if len(rows) != 1 {
+		t.Fatalf("analytics rows = %+v, want standalone event row", rows)
+	}
+	if rows[0].ProjectID != "" || rows[0].ProjectName != "" ||
+		usageTokenValue(rows[0].Tokens.InputTokens) != 10 ||
+		usageTokenValue(rows[0].Tokens.OutputTokens) != 3 {
+		t.Fatalf("standalone analytics row = %+v", rows[0])
+	}
+
+	coverage, err := s.GetUsageAnalyticsCoverage(ctx, filter)
+	mustNoError(t, err, "get standalone analytics coverage")
+	if coverage.EventCount != 1 || coverage.SessionCount != 1 || coverage.SourceCount != 1 {
+		t.Fatalf("coverage = %+v, want same standalone event scope", coverage)
+	}
+}
+
 func seedUsageSession(t *testing.T, s *sqlite.Store, harness domain.AgentHarness) domain.SessionRecord {
 	t.Helper()
 	ctx := context.Background()
