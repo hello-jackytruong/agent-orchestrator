@@ -1749,6 +1749,80 @@ type ListCompactSessionUsageResponse struct {
 	Sessions []CompactSessionUsageResponse `json:"sessions"`
 }
 
+// UsageAnalyticsQuery is the query string accepted by GET
+// /api/v1/usage/analytics. Start is inclusive and end is exclusive. Date-only
+// values are interpreted in timezone.
+type UsageAnalyticsQuery struct {
+	ProjectID   domain.ProjectID `query:"projectId,omitempty"`
+	Harness     string           `query:"harness,omitempty"`
+	ModelID     string           `query:"modelId,omitempty"`
+	Start       string           `query:"start,omitempty" description:"Inclusive RFC3339 instant or YYYY-MM-DD local date."`
+	End         string           `query:"end,omitempty" description:"Exclusive RFC3339 instant or YYYY-MM-DD local date."`
+	Timezone    string           `query:"timezone,omitempty" description:"IANA timezone used for local day and week buckets."`
+	Granularity string           `query:"granularity,omitempty" enum:"hour,day,week"`
+}
+
+// UsageAnalyticsBucketResponse is one time bucket in the requested timezone.
+type UsageAnalyticsBucketResponse struct {
+	Start      time.Time           `json:"start"`
+	End        time.Time           `json:"end"`
+	EventCount int64               `json:"eventCount" minimum:"0"`
+	Totals     UsageTotalsResponse `json:"totals"`
+}
+
+// UsageAnalyticsProjectResponse compares usage by AO project.
+type UsageAnalyticsProjectResponse struct {
+	ProjectID   domain.ProjectID    `json:"projectId"`
+	ProjectName string              `json:"projectName"`
+	EventCount  int64               `json:"eventCount" minimum:"0"`
+	Totals      UsageTotalsResponse `json:"totals"`
+}
+
+// UsageAnalyticsModelResponse compares usage by harness and model.
+type UsageAnalyticsModelResponse struct {
+	Harness    string              `json:"harness"`
+	ModelID    string              `json:"modelId"`
+	EventCount int64               `json:"eventCount" minimum:"0"`
+	Totals     UsageTotalsResponse `json:"totals"`
+}
+
+// UsageAnalyticsHarnessResponse compares usage by AO harness.
+type UsageAnalyticsHarnessResponse struct {
+	Harness    string              `json:"harness"`
+	EventCount int64               `json:"eventCount" minimum:"0"`
+	Totals     UsageTotalsResponse `json:"totals"`
+}
+
+// UsageAnalyticsCoverageResponse describes source and integrity coverage for
+// the selected analytics period.
+type UsageAnalyticsCoverageResponse struct {
+	EventCount             int64    `json:"eventCount" minimum:"0"`
+	PricedEventCount       int64    `json:"pricedEventCount" minimum:"0"`
+	UnpricedEventCount     int64    `json:"unpricedEventCount" minimum:"0"`
+	SessionCount           int64    `json:"sessionCount" minimum:"0"`
+	IncompleteSessionCount int64    `json:"incompleteSessionCount" minimum:"0"`
+	SourceCount            int64    `json:"sourceCount" minimum:"0"`
+	PartialSourceCount     int64    `json:"partialSourceCount" minimum:"0"`
+	SupportedSources       []string `json:"supportedSources"`
+}
+
+// UsageAnalyticsResponse is the dashboard analytics read model.
+type UsageAnalyticsResponse struct {
+	Start       time.Time `json:"start"`
+	End         time.Time `json:"end"`
+	Timezone    string    `json:"timezone"`
+	Granularity string    `json:"granularity" enum:"hour,day,week"`
+
+	Totals        UsageTotalsResponse             `json:"totals"`
+	DailyBuckets  []UsageAnalyticsBucketResponse  `json:"dailyBuckets"`
+	HourlyBuckets []UsageAnalyticsBucketResponse  `json:"hourlyBuckets"`
+	TimeSeries    []UsageAnalyticsBucketResponse  `json:"timeSeries"`
+	Projects      []UsageAnalyticsProjectResponse `json:"projects"`
+	Models        []UsageAnalyticsModelResponse   `json:"models"`
+	Harnesses     []UsageAnalyticsHarnessResponse `json:"harnesses"`
+	Coverage      UsageAnalyticsCoverageResponse  `json:"coverage"`
+}
+
 // SessionMemoryProcessResponse is one process in a session's runtime tree.
 type SessionMemoryProcessResponse struct {
 	PID        int     `json:"pid"`
