@@ -436,6 +436,13 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersUsageModelResponse":               "UsageModelResponse",
 	"ControllersUsageHarnessResponse":             "UsageHarnessResponse",
 	"ControllersSessionUsageResponse":             "SessionUsageResponse",
+	"ControllersUsageAnalyticsQuery":              "UsageAnalyticsQuery",
+	"ControllersUsageAnalyticsBucketResponse":     "UsageAnalyticsBucketResponse",
+	"ControllersUsageAnalyticsProjectResponse":    "UsageAnalyticsProjectResponse",
+	"ControllersUsageAnalyticsModelResponse":      "UsageAnalyticsModelResponse",
+	"ControllersUsageAnalyticsHarnessResponse":    "UsageAnalyticsHarnessResponse",
+	"ControllersUsageAnalyticsCoverageResponse":   "UsageAnalyticsCoverageResponse",
+	"ControllersUsageAnalyticsResponse":           "UsageAnalyticsResponse",
 	// httpd/controllers — standalone shell terminal wire envelopes
 	"ControllersShellTerminalHandleIDParam":            "ShellTerminalHandleIDParam",
 	"ControllersOpenShellTerminalRequest":              "OpenShellTerminalRequest",
@@ -840,6 +847,17 @@ type conversationSnapshotQuery struct {
 
 func usageOperations() []operation {
 	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/usage/analytics", id: "getUsageAnalytics", tag: "usage",
+			summary:    "Get range-based token and estimated cost analytics",
+			pathParams: []any{controllers.UsageAnalyticsQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.UsageAnalyticsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
 		{
 			method: http.MethodGet, path: "/api/v1/usage/sessions", id: "listCompactSessionUsage", tag: "usage",
 			summary:    "List compact token and estimated cost usage for session cards",

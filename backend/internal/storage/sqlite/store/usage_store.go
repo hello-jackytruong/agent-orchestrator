@@ -807,6 +807,87 @@ func (s *Store) ListCompactSessionUsageAggregates(ctx context.Context, projectID
 	return out, nil
 }
 
+// ListUsageAnalyticsHourlyAggregates returns canonical event aggregates grouped
+// by UTC hour, project, harness, and model for the analytics dashboard.
+func (s *Store) ListUsageAnalyticsHourlyAggregates(ctx context.Context, filter domain.UsageAnalyticsFilter) ([]domain.UsageAnalyticsAggregate, error) {
+	rows, err := s.qr.ListUsageAnalyticsHourlyAggregates(ctx, gen.ListUsageAnalyticsHourlyAggregatesParams{
+		StartAt:   sql.NullTime{Time: filter.Start.UTC(), Valid: true},
+		EndAt:     sql.NullTime{Time: filter.End.UTC(), Valid: true},
+		ProjectID: string(filter.ProjectID),
+		Harness:   string(filter.Harness),
+		ModelID:   strings.TrimSpace(filter.ModelID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list usage analytics aggregates: %w", err)
+	}
+	out := make([]domain.UsageAnalyticsAggregate, 0, len(rows))
+	for _, row := range rows {
+		var projectID domain.ProjectID
+		if row.ProjectID != nil {
+			projectID = *row.ProjectID
+		}
+		projectName := string(projectID)
+		if row.ProjectName != nil {
+			projectName = string(*row.ProjectName)
+		}
+		bucketAt := row.BucketAt.Time.UTC().Truncate(time.Hour)
+		out = append(out, domain.UsageAnalyticsAggregate{
+			BucketHourUTC: bucketAt,
+			ProjectID:     projectID,
+			ProjectName:   projectName,
+			Harness:       row.Harness,
+			ModelID:       row.ModelID,
+			Tokens: domain.UsageTokenMetrics{
+				InputTokens:         int64PtrWhen(row.InputTokens, row.KnownInputTokenCount == row.EventCount),
+				CachedInputTokens:   int64PtrWhen(row.CachedInputTokens, row.KnownCachedInputTokenCount == row.EventCount),
+				UncachedInputTokens: int64PtrWhen(row.UncachedInputTokens, row.KnownUncachedInputTokenCount == row.EventCount),
+				OutputTokens:        int64PtrWhen(row.OutputTokens, row.KnownOutputTokenCount == row.EventCount),
+			},
+			Cost: domain.UsageCostAggregate{
+				EventCount: row.EventCount, PricedEventCount: row.PricedEventCount, PricedTotalNanos: row.PricedTotalNanos,
+				ObservedCostEventCount: row.ObservedCostEventCount, InferredCostEventCount: row.InferredCostEventCount,
+				KnownInputCount: row.KnownInputCount, KnownInputNanos: row.KnownInputNanos,
+				UnpricedKnownInputNanos: row.UnpricedKnownInputNanos,
+				KnownCachedInputCount:   row.KnownCachedInputCount, KnownCachedInputNanos: row.KnownCachedInputNanos,
+				UnpricedKnownCachedInputNanos: row.UnpricedKnownCachedInputNanos,
+				KnownOutputCount:              row.KnownOutputCount, KnownOutputNanos: row.KnownOutputNanos,
+				UnpricedKnownOutputNanos: row.UnpricedKnownOutputNanos,
+			},
+		})
+	}
+	return out, nil
+}
+
+// GetUsageAnalyticsCoverage returns source and integrity coverage facts for
+// the same filtered analytics slice.
+func (s *Store) GetUsageAnalyticsCoverage(ctx context.Context, filter domain.UsageAnalyticsFilter) (domain.UsageAnalyticsCoverage, error) {
+	row, err := s.qr.GetUsageAnalyticsCoverage(ctx, gen.GetUsageAnalyticsCoverageParams{
+		StartAt:   sql.NullTime{Time: filter.Start.UTC(), Valid: true},
+		EndAt:     sql.NullTime{Time: filter.End.UTC(), Valid: true},
+		ProjectID: string(filter.ProjectID),
+		Harness:   string(filter.Harness),
+		ModelID:   strings.TrimSpace(filter.ModelID),
+	})
+	if err != nil {
+		return domain.UsageAnalyticsCoverage{}, fmt.Errorf("get usage analytics coverage: %w", err)
+	}
+	return domain.UsageAnalyticsCoverage{
+		EventCount:             row.EventCount,
+		PricedEventCount:       row.PricedEventCount,
+		UnpricedEventCount:     row.EventCount - row.PricedEventCount,
+		SessionCount:           row.SessionCount,
+		IncompleteSessionCount: row.IncompleteSessionCount,
+		SourceCount:            row.SourceCount,
+		PartialSourceCount:     row.PartialSourceCount,
+		SupportedSources: []domain.UsageSourceKind{
+			domain.UsageSourceClaudeMain,
+			domain.UsageSourceClaudeSubagent,
+			domain.UsageSourceCodexRollout,
+			domain.UsageSourceKimiWire,
+		},
+	}, nil
+}
+
 func usageBindingFromGen(row gen.UsageBinding) domain.UsageBindingRecord {
 	return domain.UsageBindingRecord{
 		ID:             row.ID,

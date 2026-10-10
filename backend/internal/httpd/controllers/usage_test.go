@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -20,8 +21,10 @@ import (
 type fakeUsageSummaryService struct {
 	projectID domain.ProjectID
 	sessionID domain.SessionID
+	filter    domain.UsageAnalyticsFilter
 	items     []domain.CompactSessionUsage
 	detail    domain.SessionUsageSummary
+	analytics domain.UsageAnalyticsSummary
 	err       error
 }
 
@@ -33,6 +36,11 @@ func (f *fakeUsageSummaryService) ListCompact(_ context.Context, projectID domai
 func (f *fakeUsageSummaryService) Get(_ context.Context, sessionID domain.SessionID) (domain.SessionUsageSummary, error) {
 	f.sessionID = sessionID
 	return f.detail, f.err
+}
+
+func (f *fakeUsageSummaryService) GetAnalytics(_ context.Context, filter domain.UsageAnalyticsFilter) (domain.UsageAnalyticsSummary, error) {
+	f.filter = filter
+	return f.analytics, f.err
 }
 
 func newUsageTestServer(t *testing.T, svc *fakeUsageSummaryService) *httptest.Server {
@@ -201,6 +209,94 @@ func TestUsageAPIShowsDetailedEstimatedCostAndProviderAttribution(t *testing.T) 
 		got.Harnesses[0].Models[0].Totals.EstimatedCost.Coverage != "complete" ||
 		got.Harnesses[0].Models[0].Totals.EstimatedCost.ProviderAttribution != "observed" {
 		t.Fatalf("response = %+v", got)
+	}
+}
+
+func TestUsageAPIShowsAnalyticsBucketsAndCoverage(t *testing.T) {
+	input := int64(100)
+	output := int64(25)
+	processed := int64(125)
+	cost := int64(42)
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.FixedZone("ICT", 7*3600))
+	end := start.Add(24 * time.Hour)
+	svc := &fakeUsageSummaryService{analytics: domain.UsageAnalyticsSummary{
+		Start: start, End: end, Timezone: "Asia/Ho_Chi_Minh", Granularity: domain.UsageAnalyticsDay,
+		Totals: domain.UsageMetricTotals{
+			InputTokens: &input, OutputTokens: &output, ProcessedTokens: &processed,
+			EstimatedCost: &domain.EstimatedCost{
+				TotalNanos: cost, Coverage: domain.EstimatedCostCoveragePartial,
+				ProviderAttribution: domain.EstimatedCostProviderAttributionObserved,
+			},
+		},
+		DailyBuckets: []domain.UsageAnalyticsBucket{{
+			Start: start, End: end, EventCount: 2,
+			Totals: domain.UsageMetricTotals{InputTokens: &input, OutputTokens: &output, ProcessedTokens: &processed},
+		}},
+		HourlyBuckets: []domain.UsageAnalyticsBucket{{Start: start, End: start.Add(time.Hour), EventCount: 1}},
+		TimeSeries:    []domain.UsageAnalyticsBucket{{Start: start, End: end, EventCount: 2}},
+		Projects: []domain.UsageAnalyticsProjectSummary{{
+			ProjectID: "usage", ProjectName: "Usage", EventCount: 2,
+			Totals: domain.UsageMetricTotals{ProcessedTokens: &processed},
+		}},
+		Models: []domain.UsageAnalyticsModelSummary{{
+			Harness: domain.HarnessCodex, ModelID: "gpt-5", EventCount: 2,
+			Totals: domain.UsageMetricTotals{ProcessedTokens: &processed},
+		}},
+		Harnesses: []domain.UsageAnalyticsHarnessSummary{{
+			Harness: domain.HarnessCodex, EventCount: 2,
+			Totals: domain.UsageMetricTotals{ProcessedTokens: &processed},
+		}},
+		Coverage: domain.UsageAnalyticsCoverage{
+			EventCount: 2, PricedEventCount: 1, UnpricedEventCount: 1,
+			SessionCount: 1, IncompleteSessionCount: 1, SourceCount: 1, PartialSourceCount: 1,
+			SupportedSources: []domain.UsageSourceKind{domain.UsageSourceCodexRollout},
+		},
+	}}
+	srv := newUsageTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, http.MethodGet, "/api/v1/usage/analytics?projectId=usage&harness=codex&modelId=gpt-5&start=2026-10-01&end=2026-10-02&timezone=Asia/Ho_Chi_Minh&granularity=day", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+	if svc.filter.ProjectID != "usage" || svc.filter.Harness != domain.HarnessCodex ||
+		svc.filter.ModelID != "gpt-5" || svc.filter.Timezone != "Asia/Ho_Chi_Minh" ||
+		svc.filter.Granularity != domain.UsageAnalyticsDay {
+		t.Fatalf("filter = %+v", svc.filter)
+	}
+	var got struct {
+		Timezone string `json:"timezone"`
+		Totals   struct {
+			ProcessedTokens int64 `json:"processedTokens"`
+			EstimatedCost   struct {
+				TotalNanos int64  `json:"totalNanos"`
+				Coverage   string `json:"coverage"`
+			} `json:"estimatedCost"`
+		} `json:"totals"`
+		DailyBuckets []struct {
+			EventCount int64 `json:"eventCount"`
+			Totals     struct {
+				ProcessedTokens int64 `json:"processedTokens"`
+			} `json:"totals"`
+		} `json:"dailyBuckets"`
+		Projects []struct {
+			ProjectID   string `json:"projectId"`
+			ProjectName string `json:"projectName"`
+		} `json:"projects"`
+		Coverage struct {
+			UnpricedEventCount     int64    `json:"unpricedEventCount"`
+			IncompleteSessionCount int64    `json:"incompleteSessionCount"`
+			SupportedSources       []string `json:"supportedSources"`
+		} `json:"coverage"`
+	}
+	mustJSON(t, body, &got)
+	if got.Timezone != "Asia/Ho_Chi_Minh" || got.Totals.ProcessedTokens != 125 ||
+		got.Totals.EstimatedCost.TotalNanos != 42 || got.Totals.EstimatedCost.Coverage != "partial" ||
+		len(got.DailyBuckets) != 1 || got.DailyBuckets[0].EventCount != 2 ||
+		got.DailyBuckets[0].Totals.ProcessedTokens != 125 ||
+		len(got.Projects) != 1 || got.Projects[0].ProjectID != "usage" || got.Projects[0].ProjectName != "Usage" ||
+		got.Coverage.UnpricedEventCount != 1 || got.Coverage.IncompleteSessionCount != 1 ||
+		len(got.Coverage.SupportedSources) != 1 || got.Coverage.SupportedSources[0] != "codex_rollout" {
+		t.Fatalf("analytics response = %+v", got)
 	}
 }
 
