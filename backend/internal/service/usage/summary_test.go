@@ -4,18 +4,22 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 type usageSummaryStoreStub struct {
 	projectID  domain.ProjectID
+	filter     domain.UsageAnalyticsFilter
 	rows       []domain.CompactSessionUsageAggregate
 	session    domain.SessionRecord
 	found      bool
 	incomplete bool
 	models     []domain.UsageModelAggregate
-	calls      [4]int
+	analytics  []domain.UsageAnalyticsAggregate
+	coverage   domain.UsageAnalyticsCoverage
+	calls      [6]int
 }
 
 func (s *usageSummaryStoreStub) ListCompactSessionUsageAggregates(_ context.Context, id domain.ProjectID) ([]domain.CompactSessionUsageAggregate, error) {
@@ -33,6 +37,16 @@ func (s *usageSummaryStoreStub) ListUsageModelAggregates(context.Context, domain
 func (s *usageSummaryStoreStub) GetUsageSessionIncomplete(context.Context, domain.SessionID) (bool, error) {
 	s.calls[3]++
 	return s.incomplete, nil
+}
+func (s *usageSummaryStoreStub) ListUsageAnalyticsHourlyAggregates(_ context.Context, filter domain.UsageAnalyticsFilter) ([]domain.UsageAnalyticsAggregate, error) {
+	s.calls[4]++
+	s.filter = filter
+	return s.analytics, nil
+}
+func (s *usageSummaryStoreStub) GetUsageAnalyticsCoverage(_ context.Context, filter domain.UsageAnalyticsFilter) (domain.UsageAnalyticsCoverage, error) {
+	s.calls[5]++
+	s.filter = filter
+	return s.coverage, nil
 }
 
 func TestSummaryReaderListCompactUsesOneBatchRead(t *testing.T) {
@@ -155,7 +169,7 @@ func TestSummaryReaderGetPreservesStrongestPartialLowerBoundWithoutDoubleCountin
 		got.Harnesses[1].Totals.ProcessedTokens == nil || *got.Harnesses[1].Totals.ProcessedTokens != 125 {
 		t.Fatalf("processed totals by scope = %+v", got.Harnesses)
 	}
-	if store.calls != [4]int{0, 1, 1, 1} {
+	if store.calls != [6]int{0, 1, 1, 1, 0, 0} {
 		t.Fatalf("store calls = %v", store.calls)
 	}
 }
@@ -206,6 +220,106 @@ func TestSummaryReaderReturnsUnavailableCostForZeroPartialLowerBound(t *testing.
 	}
 }
 
+func TestSummaryReaderAnalyticsBucketsTimezoneFiltersAndNullTotals(t *testing.T) {
+	loc := time.FixedZone("ICT", 7*3600)
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, loc)
+	end := start.Add(48 * time.Hour)
+	cost := completeCostAggregate(1, 100, 70, 10, 30)
+	partialCost := domain.UsageCostAggregate{
+		EventCount:               1,
+		ObservedCostEventCount:   1,
+		KnownInputCount:          1,
+		KnownInputNanos:          20,
+		UnpricedKnownInputNanos:  20,
+		KnownCachedInputCount:    1,
+		KnownCachedInputNanos:    0,
+		KnownOutputCount:         1,
+		KnownOutputNanos:         5,
+		UnpricedKnownOutputNanos: 5,
+	}
+	store := &usageSummaryStoreStub{
+		analytics: []domain.UsageAnalyticsAggregate{
+			{
+				BucketHourUTC: time.Date(2026, 9, 30, 17, 0, 0, 0, time.UTC),
+				ProjectID:     "usage", ProjectName: "Usage",
+				Harness: domain.HarnessCodex, ModelID: "gpt-5",
+				Tokens: testUsageMetrics(100, 40, 60, 20), Cost: cost,
+			},
+			{
+				BucketHourUTC: time.Date(2026, 9, 30, 18, 0, 0, 0, time.UTC),
+				ProjectID:     "usage", ProjectName: "Usage",
+				Harness: domain.HarnessClaudeCode, ModelID: "claude-sonnet",
+				Tokens: testUsageMetrics(50, 0, 50, 10), Cost: partialCost,
+			},
+			{
+				BucketHourUTC: time.Date(2026, 9, 30, 19, 0, 0, 0, time.UTC),
+				ProjectID:     "other", ProjectName: "Other",
+				Harness: domain.HarnessCodex, ModelID: "unknown-model",
+				Tokens: domain.UsageTokenMetrics{OutputTokens: value(5)}, Cost: domain.UsageCostAggregate{EventCount: 1},
+			},
+		},
+		coverage: domain.UsageAnalyticsCoverage{
+			EventCount: 3, PricedEventCount: 1, UnpricedEventCount: 2,
+			SessionCount: 2, IncompleteSessionCount: 1, SourceCount: 3, PartialSourceCount: 1,
+			SupportedSources: []domain.UsageSourceKind{domain.UsageSourceCodexRollout},
+		},
+	}
+
+	got, err := NewSummaryReader(store).GetAnalytics(context.Background(), domain.UsageAnalyticsFilter{
+		ProjectID: "usage", Harness: domain.HarnessCodex, ModelID: "gpt-5",
+		Start: start, End: end, Timezone: "Asia/Ho_Chi_Minh", Granularity: domain.UsageAnalyticsDay,
+	})
+	mustNoError(t, err)
+	if store.calls != [6]int{0, 0, 0, 0, 1, 1} ||
+		!store.filter.Start.Equal(start.UTC()) || !store.filter.End.Equal(end.UTC()) ||
+		store.filter.ProjectID != "usage" || store.filter.Harness != domain.HarnessCodex ||
+		store.filter.ModelID != "gpt-5" {
+		t.Fatalf("store calls/filter = %v %+v", store.calls, store.filter)
+	}
+	if got.Timezone != "Asia/Ho_Chi_Minh" || got.Granularity != domain.UsageAnalyticsDay ||
+		!got.Start.Equal(start) || !got.End.Equal(end) {
+		t.Fatalf("range = %s %s %s %s", got.Start, got.End, got.Timezone, got.Granularity)
+	}
+	if got.Totals.InputTokens != nil || got.Totals.ProcessedTokens != nil {
+		t.Fatalf("unknown event did not keep aggregate token totals nullable: %+v", got.Totals)
+	}
+	if got.Totals.OutputTokens == nil || *got.Totals.OutputTokens != 35 ||
+		got.Totals.EstimatedCost == nil || got.Totals.EstimatedCost.TotalNanos != 125 ||
+		got.Totals.EstimatedCost.Coverage != domain.EstimatedCostCoveragePartial {
+		t.Fatalf("totals = %+v", got.Totals)
+	}
+	if len(got.DailyBuckets) != 2 || got.DailyBuckets[0].EventCount != 3 || got.DailyBuckets[1].EventCount != 0 {
+		t.Fatalf("daily buckets = %+v", got.DailyBuckets)
+	}
+	if len(got.HourlyBuckets) != 48 || got.HourlyBuckets[0].EventCount != 1 || got.HourlyBuckets[1].EventCount != 1 ||
+		got.HourlyBuckets[2].EventCount != 1 || got.HourlyBuckets[3].EventCount != 0 {
+		t.Fatalf("hourly buckets len/events = %d %+v", len(got.HourlyBuckets), got.HourlyBuckets[:4])
+	}
+	if len(got.TimeSeries) != 2 || got.TimeSeries[0].EventCount != 3 || got.TimeSeries[1].EventCount != 0 {
+		t.Fatalf("series = %+v", got.TimeSeries)
+	}
+	if len(got.Projects) != 2 || got.Projects[0].ProjectID != "usage" || got.Projects[1].ProjectID != "other" {
+		t.Fatalf("projects = %+v", got.Projects)
+	}
+	if got.Coverage.UnpricedEventCount != 2 || got.Coverage.IncompleteSessionCount != 1 ||
+		len(got.Coverage.SupportedSources) != 1 || got.Coverage.SupportedSources[0] != domain.UsageSourceCodexRollout {
+		t.Fatalf("coverage = %+v", got.Coverage)
+	}
+}
+
+func TestSummaryReaderAnalyticsRejectsInvalidRangeAndTimezone(t *testing.T) {
+	reader := NewSummaryReader(&usageSummaryStoreStub{})
+	_, err := reader.GetAnalytics(context.Background(), domain.UsageAnalyticsFilter{Timezone: "Not/AZone"})
+	if err == nil {
+		t.Fatal("invalid timezone returned nil error")
+	}
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	_, err = reader.GetAnalytics(context.Background(), domain.UsageAnalyticsFilter{Start: now, End: now, Timezone: "UTC"})
+	if err == nil {
+		t.Fatal("invalid range returned nil error")
+	}
+}
+
 func TestSummaryReaderRejectsAggregateOverflow(t *testing.T) {
 	t.Run("partial lower bound", func(t *testing.T) {
 		store := &usageSummaryStoreStub{rows: []domain.CompactSessionUsageAggregate{{
@@ -249,6 +363,8 @@ func testUsageMetrics(input, cachedInput, uncachedInput, output int64) domain.Us
 		OutputTokens: &output,
 	}
 }
+
+func value(v int64) *int64 { return &v }
 
 func TestSummaryReaderGetReturnsUnavailableMetricsWithoutEvents(t *testing.T) {
 	store := &usageSummaryStoreStub{found: true, session: domain.SessionRecord{ID: "empty"}}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -19,6 +21,7 @@ import (
 type UsageSummaryService interface {
 	ListCompact(context.Context, domain.ProjectID) ([]domain.CompactSessionUsage, error)
 	Get(context.Context, domain.SessionID) (domain.SessionUsageSummary, error)
+	GetAnalytics(context.Context, domain.UsageAnalyticsFilter) (domain.UsageAnalyticsSummary, error)
 }
 
 // SessionMemoryService samples resident memory per live session.
@@ -56,10 +59,77 @@ type UsageController struct {
 
 // Register mounts usage routes on the supplied router.
 func (c *UsageController) Register(r chi.Router) {
+	r.Get("/usage/analytics", c.getAnalytics)
 	r.Get("/usage/sessions", c.listSessions)
 	r.Get("/usage/sessions/memory", c.listMemory)
 	r.Get("/usage/memory/pressure", c.getPressure)
 	r.Get("/usage/sessions/{sessionId}", c.getSession)
+}
+
+func (c *UsageController) getAnalytics(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/usage/analytics")
+		return
+	}
+	filter, err := usageAnalyticsFilterFromRequest(r)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	summary, err := c.Svc.GetAnalytics(r.Context(), filter)
+	if err != nil {
+		c.Log.WarnContext(r.Context(), "failed to get usage analytics", "error", err)
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, usageAnalyticsResponse(summary))
+}
+
+func usageAnalyticsFilterFromRequest(r *http.Request) (domain.UsageAnalyticsFilter, error) {
+	q := r.URL.Query()
+	tz := strings.TrimSpace(q.Get("timezone"))
+	loc := time.Local
+	if tz != "" && tz != "Local" {
+		loaded, err := time.LoadLocation(tz)
+		if err != nil {
+			return domain.UsageAnalyticsFilter{}, apierr.Invalid("USAGE_ANALYTICS_TIMEZONE_INVALID", "Invalid usage analytics timezone", map[string]any{"timezone": tz})
+		}
+		loc = loaded
+	}
+	start, err := parseUsageAnalyticsBoundary(q.Get("start"), loc)
+	if err != nil {
+		return domain.UsageAnalyticsFilter{}, apierr.Invalid("USAGE_ANALYTICS_START_INVALID", "Invalid usage analytics start", nil)
+	}
+	end, err := parseUsageAnalyticsBoundary(q.Get("end"), loc)
+	if err != nil {
+		return domain.UsageAnalyticsFilter{}, apierr.Invalid("USAGE_ANALYTICS_END_INVALID", "Invalid usage analytics end", nil)
+	}
+	return domain.UsageAnalyticsFilter{
+		ProjectID: domain.ProjectID(strings.TrimSpace(q.Get("projectId"))),
+		Harness:   domain.AgentHarness(strings.TrimSpace(q.Get("harness"))),
+		ModelID:   strings.TrimSpace(q.Get("modelId")),
+		Start:     start,
+		End:       end,
+		Timezone:  tz,
+		Granularity: domain.UsageAnalyticsGranularity(
+			strings.TrimSpace(q.Get("granularity")),
+		),
+	}, nil
+}
+
+func parseUsageAnalyticsBoundary(value string, loc *time.Location) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed, nil
+	}
+	day, err := time.ParseInLocation("2006-01-02", value, loc)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return day, nil
 }
 
 func (c *UsageController) listSessions(w http.ResponseWriter, r *http.Request) {
@@ -227,6 +297,57 @@ func sessionUsageResponse(summary domain.SessionUsageSummary) SessionUsageRespon
 	return SessionUsageResponse{
 		SessionID: summary.SessionID, Incomplete: summary.Incomplete,
 		Totals: usageTotalsResponse(summary.Totals), Harnesses: harnesses,
+	}
+}
+
+func usageAnalyticsResponse(summary domain.UsageAnalyticsSummary) UsageAnalyticsResponse {
+	bucket := func(in []domain.UsageAnalyticsBucket) []UsageAnalyticsBucketResponse {
+		out := make([]UsageAnalyticsBucketResponse, 0, len(in))
+		for _, item := range in {
+			out = append(out, UsageAnalyticsBucketResponse{
+				Start: item.Start, End: item.End, EventCount: item.EventCount,
+				Totals: usageTotalsResponse(item.Totals),
+			})
+		}
+		return out
+	}
+	projects := make([]UsageAnalyticsProjectResponse, 0, len(summary.Projects))
+	for _, item := range summary.Projects {
+		projects = append(projects, UsageAnalyticsProjectResponse{
+			ProjectID: item.ProjectID, ProjectName: item.ProjectName,
+			EventCount: item.EventCount, Totals: usageTotalsResponse(item.Totals),
+		})
+	}
+	models := make([]UsageAnalyticsModelResponse, 0, len(summary.Models))
+	for _, item := range summary.Models {
+		models = append(models, UsageAnalyticsModelResponse{
+			Harness: string(item.Harness), ModelID: item.ModelID,
+			EventCount: item.EventCount, Totals: usageTotalsResponse(item.Totals),
+		})
+	}
+	harnesses := make([]UsageAnalyticsHarnessResponse, 0, len(summary.Harnesses))
+	for _, item := range summary.Harnesses {
+		harnesses = append(harnesses, UsageAnalyticsHarnessResponse{
+			Harness: string(item.Harness), EventCount: item.EventCount,
+			Totals: usageTotalsResponse(item.Totals),
+		})
+	}
+	sources := make([]string, 0, len(summary.Coverage.SupportedSources))
+	for _, source := range summary.Coverage.SupportedSources {
+		sources = append(sources, string(source))
+	}
+	return UsageAnalyticsResponse{
+		Start: summary.Start, End: summary.End, Timezone: summary.Timezone,
+		Granularity: string(summary.Granularity), Totals: usageTotalsResponse(summary.Totals),
+		DailyBuckets: bucket(summary.DailyBuckets), HourlyBuckets: bucket(summary.HourlyBuckets),
+		TimeSeries: bucket(summary.TimeSeries), Projects: projects, Models: models,
+		Harnesses: harnesses,
+		Coverage: UsageAnalyticsCoverageResponse{
+			EventCount: summary.Coverage.EventCount, PricedEventCount: summary.Coverage.PricedEventCount,
+			UnpricedEventCount: summary.Coverage.UnpricedEventCount, SessionCount: summary.Coverage.SessionCount,
+			IncompleteSessionCount: summary.Coverage.IncompleteSessionCount, SourceCount: summary.Coverage.SourceCount,
+			PartialSourceCount: summary.Coverage.PartialSourceCount, SupportedSources: sources,
+		},
 	}
 }
 

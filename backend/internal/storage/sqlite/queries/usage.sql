@@ -642,3 +642,71 @@ LEFT JOIN usage_session_integrity integrity ON integrity.session_id = ub.session
 WHERE (sqlc.arg(project_id) = '' OR s.project_id = sqlc.arg(project_id))
 GROUP BY ub.session_id, s.project_id, s.num, integrity.incomplete
 ORDER BY s.project_id, s.num;
+
+-- name: ListUsageAnalyticsHourlyAggregates :many
+SELECT
+    mue.created_at AS bucket_at,
+    s.project_id,
+    COALESCE(NULLIF(p.display_name, ''), s.project_id, '') AS project_name,
+    ub.harness,
+    mue.model_id,
+    CAST(COUNT(*) AS INTEGER) AS event_count,
+    CAST(COALESCE(SUM(mue.input_tokens), 0) AS INTEGER) AS input_tokens,
+    CAST(COUNT(mue.input_tokens) AS INTEGER) AS known_input_token_count,
+    CAST(COALESCE(SUM(mue.cached_input_tokens), 0) AS INTEGER) AS cached_input_tokens,
+    CAST(COUNT(mue.cached_input_tokens) AS INTEGER) AS known_cached_input_token_count,
+    CAST(COALESCE(SUM(mue.uncached_input_tokens), 0) AS INTEGER) AS uncached_input_tokens,
+    CAST(COUNT(mue.uncached_input_tokens) AS INTEGER) AS known_uncached_input_token_count,
+    CAST(COALESCE(SUM(mue.output_tokens), 0) AS INTEGER) AS output_tokens,
+    CAST(COUNT(mue.output_tokens) AS INTEGER) AS known_output_token_count,
+    CAST(COUNT(mue.estimated_cost_nanos) AS INTEGER) AS priced_event_count,
+    CAST(COALESCE(SUM(mue.estimated_cost_nanos), 0) AS INTEGER) AS priced_total_nanos,
+    CAST(COUNT(CASE WHEN mue.billing_provider_source = 'observed' AND (
+        mue.estimated_cost_nanos IS NOT NULL OR mue.input_cost_nanos IS NOT NULL OR
+        mue.cached_input_cost_nanos IS NOT NULL OR mue.output_cost_nanos IS NOT NULL
+    ) THEN 1 END) AS INTEGER) AS observed_cost_event_count,
+    CAST(COUNT(CASE WHEN mue.billing_provider_source = 'inferred' AND (
+        mue.estimated_cost_nanos IS NOT NULL OR mue.input_cost_nanos IS NOT NULL OR
+        mue.cached_input_cost_nanos IS NOT NULL OR mue.output_cost_nanos IS NOT NULL
+    ) THEN 1 END) AS INTEGER) AS inferred_cost_event_count,
+    CAST(COUNT(mue.input_cost_nanos) AS INTEGER) AS known_input_count,
+    CAST(COALESCE(SUM(mue.input_cost_nanos), 0) AS INTEGER) AS known_input_nanos,
+    CAST(COALESCE(SUM(CASE WHEN mue.estimated_cost_nanos IS NULL THEN mue.input_cost_nanos END), 0) AS INTEGER) AS unpriced_known_input_nanos,
+    CAST(COUNT(mue.cached_input_cost_nanos) AS INTEGER) AS known_cached_input_count,
+    CAST(COALESCE(SUM(mue.cached_input_cost_nanos), 0) AS INTEGER) AS known_cached_input_nanos,
+    CAST(COALESCE(SUM(CASE WHEN mue.estimated_cost_nanos IS NULL THEN mue.cached_input_cost_nanos END), 0) AS INTEGER) AS unpriced_known_cached_input_nanos,
+    CAST(COUNT(mue.output_cost_nanos) AS INTEGER) AS known_output_count,
+    CAST(COALESCE(SUM(mue.output_cost_nanos), 0) AS INTEGER) AS known_output_nanos,
+    CAST(COALESCE(SUM(CASE WHEN mue.estimated_cost_nanos IS NULL THEN mue.output_cost_nanos END), 0) AS INTEGER) AS unpriced_known_output_nanos
+FROM model_usage_events mue
+JOIN usage_bindings ub ON ub.id = mue.binding_id
+JOIN sessions s ON s.id = ub.session_id
+LEFT JOIN projects p ON p.id = s.project_id
+WHERE mue.created_at >= sqlc.arg(start_at)
+  AND mue.created_at < sqlc.arg(end_at)
+  AND (sqlc.arg(project_id) = '' OR s.project_id = sqlc.arg(project_id))
+  AND (sqlc.arg(harness) = '' OR ub.harness = sqlc.arg(harness))
+  AND (sqlc.arg(model_id) = '' OR mue.model_id = sqlc.arg(model_id))
+GROUP BY mue.created_at, s.project_id, project_name, ub.harness, mue.model_id
+ORDER BY mue.created_at, s.project_id, ub.harness, mue.model_id;
+
+-- name: GetUsageAnalyticsCoverage :one
+SELECT
+    CAST(COUNT(*) AS INTEGER) AS event_count,
+    CAST(COUNT(mue.estimated_cost_nanos) AS INTEGER) AS priced_event_count,
+    CAST(COUNT(DISTINCT ub.session_id) AS INTEGER) AS session_count,
+    CAST(COUNT(DISTINCT CASE WHEN COALESCE(integrity.incomplete, 0) = 1 THEN ub.session_id END) AS INTEGER) AS incomplete_session_count,
+    CAST(COUNT(DISTINCT us.id) AS INTEGER) AS source_count,
+    CAST(COUNT(DISTINCT CASE
+        WHEN ub.state = 'partial' OR us.anomaly_count > 0 OR us.last_error_code <> '' THEN us.id
+    END) AS INTEGER) AS partial_source_count
+FROM model_usage_events mue
+JOIN usage_bindings ub ON ub.id = mue.binding_id
+JOIN usage_sources us ON us.id = mue.usage_source_id
+JOIN sessions s ON s.id = ub.session_id
+LEFT JOIN usage_session_integrity integrity ON integrity.session_id = ub.session_id
+WHERE mue.created_at >= sqlc.arg(start_at)
+  AND mue.created_at < sqlc.arg(end_at)
+  AND (sqlc.arg(project_id) = '' OR s.project_id = sqlc.arg(project_id))
+  AND (sqlc.arg(harness) = '' OR ub.harness = sqlc.arg(harness))
+  AND (sqlc.arg(model_id) = '' OR mue.model_id = sqlc.arg(model_id));

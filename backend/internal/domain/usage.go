@@ -365,6 +365,103 @@ type UsageMetricTotals struct {
 	EstimatedCost       *EstimatedCost
 }
 
+// UsageAnalyticsGranularity names the time-series bucket size derived from
+// canonical hourly usage facts.
+type UsageAnalyticsGranularity string
+
+const (
+	UsageAnalyticsHour UsageAnalyticsGranularity = "hour"
+	UsageAnalyticsDay  UsageAnalyticsGranularity = "day"
+	UsageAnalyticsWeek UsageAnalyticsGranularity = "week"
+)
+
+// UsageAnalyticsFilter selects a bounded analytics slice. Start is inclusive
+// and End is exclusive; both are UTC instants after the controller/service
+// normalizes any local-date input.
+type UsageAnalyticsFilter struct {
+	ProjectID   ProjectID
+	Harness     AgentHarness
+	ModelID     string
+	Start       time.Time
+	End         time.Time
+	Timezone    string
+	Granularity UsageAnalyticsGranularity
+}
+
+// UsageAnalyticsAggregate is one storage-level aggregate over canonical usage
+// events. BucketHourUTC is the UTC hour that contains the event timestamps.
+type UsageAnalyticsAggregate struct {
+	BucketHourUTC time.Time
+	ProjectID     ProjectID
+	ProjectName   string
+	Harness       AgentHarness
+	ModelID       string
+	Tokens        UsageTokenMetrics
+	Cost          UsageCostAggregate
+}
+
+// UsageAnalyticsBucket is a user-facing time bucket in the requested timezone.
+type UsageAnalyticsBucket struct {
+	Start      time.Time
+	End        time.Time
+	Totals     UsageMetricTotals
+	EventCount int64
+}
+
+// UsageAnalyticsProjectSummary compares usage by AO project.
+type UsageAnalyticsProjectSummary struct {
+	ProjectID   ProjectID
+	ProjectName string
+	Totals      UsageMetricTotals
+	EventCount  int64
+}
+
+// UsageAnalyticsModelSummary compares usage by harness and model.
+type UsageAnalyticsModelSummary struct {
+	Harness    AgentHarness
+	ModelID    string
+	Totals     UsageMetricTotals
+	EventCount int64
+}
+
+// UsageAnalyticsHarnessSummary compares usage by AO harness.
+type UsageAnalyticsHarnessSummary struct {
+	Harness    AgentHarness
+	Totals     UsageMetricTotals
+	EventCount int64
+}
+
+// UsageAnalyticsCoverage describes what the analytics slice can and cannot
+// explain. Cost coverage remains on EstimatedCost; this block names source and
+// integrity limits.
+type UsageAnalyticsCoverage struct {
+	EventCount             int64
+	PricedEventCount       int64
+	UnpricedEventCount     int64
+	SessionCount           int64
+	IncompleteSessionCount int64
+	SourceCount            int64
+	PartialSourceCount     int64
+	SupportedSources       []UsageSourceKind
+}
+
+// UsageAnalyticsSummary is the dashboard read model returned by the usage
+// service.
+type UsageAnalyticsSummary struct {
+	Start         time.Time
+	End           time.Time
+	Timezone      string
+	Granularity   UsageAnalyticsGranularity
+	Totals        UsageMetricTotals
+	DailyBuckets  []UsageAnalyticsBucket
+	HourlyBuckets []UsageAnalyticsBucket
+	TimeSeries    []UsageAnalyticsBucket
+	Projects      []UsageAnalyticsProjectSummary
+	Models        []UsageAnalyticsModelSummary
+	Harnesses     []UsageAnalyticsHarnessSummary
+	Coverage      UsageAnalyticsCoverage
+}
+
 // ModelUsageSummary is a per-model aggregate. The billing provider stays a
 // pricing input: every event was costed against its own provider's rates before
 // it reached this sum, so the total is exact without splitting the model apart.
