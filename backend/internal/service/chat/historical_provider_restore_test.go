@@ -343,6 +343,103 @@ func TestHistoricalProjectProviderRestoreAppendsOwnershipEpochAtomically(t *test
 	}
 }
 
+func TestProjectOrchestratorResumeRepairsStalePredecessorBranch(t *testing.T) {
+	fixture := seedHistoricalProviderFixture(t)
+	ctx := context.Background()
+	previous := fixture.source
+	previous.IsTerminated = true
+	previous.Activity.State = domain.ActivityExited
+	if err := fixture.store.UpdateSession(ctx, previous); err != nil {
+		t.Fatalf("retire previous orchestrator: %v", err)
+	}
+	target := fixture.target
+	target.IsTerminated = false
+	target.Metadata.ControllerGeneration = "previous-target-generation"
+	if err := fixture.store.UpdateSession(ctx, target); err != nil {
+		t.Fatalf("make target resumable: %v", err)
+	}
+	created, err := fixture.store.AppendUserMessage(ctx, fixture.conversation.ID, target.ID,
+		target.Metadata.ControllerGeneration, domain.ConversationMessage{
+			ID: "prior-target-user", Text: "restore my prior question",
+			Origin: domain.MessageOriginHuman, ClientMessageID: "prior-target-client",
+		}, "prior-target-turn", fixture.now.Add(6*time.Second))
+	if err != nil || !created {
+		t.Fatalf("seed target history on predecessor branch: created=%v err=%v", created, err)
+	}
+	if err := fixture.store.BindTurnToProvider(ctx, "prior-target-turn", "history-turn", fixture.now.Add(7*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	provider := &nativeHistoryConversation{
+		fakeConversation: newFakeConversation(), events: historicalNativeHistory(),
+	}
+	provider.providerConversationID = historicalTargetThread
+	var resumedScope string
+	nextID := 0
+	lcm := lifecycle.New(fixture.store, nil)
+	svc := chatsvc.New(chatsvc.Options{
+		Store: fixture.store, Reader: snapshotReader(fixture.store), Sessions: fixture.store,
+		Drivers: fakeRegistry{driver: fakeDriver{resume: func(cfg ports.ChatResumeConfig) (ports.ChatConversation, error) {
+			resumedScope = cfg.ProviderScopeID
+			return provider, nil
+		}}},
+		NewID: func() string {
+			nextID++
+			return fmt.Sprintf("recovered-id-%d", nextID)
+		},
+		Now: func() time.Time { return fixture.now.Add(10 * time.Second) },
+	})
+	t.Cleanup(func() { _ = svc.Stop(context.Background(), target.ID) })
+	if _, err := svc.Start(ctx, chatsvc.StartConfig{
+		SessionID: target.ID, ProjectID: testProject,
+		Kind: domain.KindOrchestrator, Harness: domain.HarnessCodex,
+		WorkspacePath: target.Metadata.WorkspacePath, ProviderConversationID: historicalTargetThread,
+		ControllerReady: historicalControllerReady(lcm, target),
+	}); err != nil {
+		t.Fatalf("resume stale project branch: %v", err)
+	}
+	if resumedScope == "" || resumedScope == fixture.root.ProviderScopeID {
+		t.Fatalf("resumed provider scope = %q", resumedScope)
+	}
+	conversation, err := fixture.store.ConversationForSession(ctx, target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conversation.ActiveBranchID != resumedScope {
+		t.Fatalf("active branch = %q, want %q", conversation.ActiveBranchID, resumedScope)
+	}
+	root, err := fixture.store.ConversationBranch(ctx, conversation.ID, fixture.root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.SessionID != previous.ID || root.ProviderConversationID != previous.Metadata.ProviderConversationID {
+		t.Fatalf("predecessor branch changed: %+v", root)
+	}
+	if err := svc.Stop(ctx, target.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Start(ctx, chatsvc.StartConfig{
+		SessionID: target.ID, ProjectID: testProject,
+		Kind: domain.KindOrchestrator, Harness: domain.HarnessCodex,
+		WorkspacePath: target.Metadata.WorkspacePath, ProviderConversationID: historicalTargetThread,
+		ControllerReady: historicalControllerReady(lcm, target),
+	}); err != nil {
+		t.Fatalf("second resume after repair: %v", err)
+	}
+	snapshot, err := fixture.store.LoadConversationSnapshot(ctx, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchingUsers := 0
+	for _, message := range snapshot.Messages {
+		if message.Text == "restore my prior question" {
+			matchingUsers++
+		}
+	}
+	if matchingUsers != 1 {
+		t.Fatalf("native history imported %d copies of the prior target prompt", matchingUsers)
+	}
+}
+
 func TestHistoricalProjectProviderRestoreFailureNeverPublishesEpoch(t *testing.T) {
 	tests := []struct {
 		name   string
