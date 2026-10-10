@@ -357,6 +357,65 @@ func (q *Queries) GetModelUsageEventByKey(ctx context.Context, arg GetModelUsage
 	return i, err
 }
 
+const getUsageAnalyticsCoverage = `-- name: GetUsageAnalyticsCoverage :one
+SELECT
+    CAST(COUNT(*) AS INTEGER) AS event_count,
+    CAST(COUNT(mue.estimated_cost_nanos) AS INTEGER) AS priced_event_count,
+    CAST(COUNT(DISTINCT ub.session_id) AS INTEGER) AS session_count,
+    CAST(COUNT(DISTINCT CASE WHEN COALESCE(integrity.incomplete, 0) = 1 THEN ub.session_id END) AS INTEGER) AS incomplete_session_count,
+    CAST(COUNT(DISTINCT us.id) AS INTEGER) AS source_count,
+    CAST(COUNT(DISTINCT CASE
+        WHEN ub.state = 'partial' OR us.anomaly_count > 0 OR us.last_error_code <> '' THEN us.id
+    END) AS INTEGER) AS partial_source_count
+FROM model_usage_events mue
+JOIN usage_bindings ub ON ub.id = mue.binding_id
+JOIN usage_sources us ON us.id = mue.usage_source_id
+JOIN sessions s ON s.id = ub.session_id
+LEFT JOIN usage_session_integrity integrity ON integrity.session_id = ub.session_id
+WHERE mue.created_at >= ?1
+  AND mue.created_at < ?2
+  AND (?3 = '' OR s.project_id = ?3)
+  AND (?4 = '' OR ub.harness = ?4)
+  AND (?5 = '' OR mue.model_id = ?5)
+`
+
+type GetUsageAnalyticsCoverageParams struct {
+	StartAt   sql.NullTime
+	EndAt     sql.NullTime
+	ProjectID interface{}
+	Harness   interface{}
+	ModelID   interface{}
+}
+
+type GetUsageAnalyticsCoverageRow struct {
+	EventCount             int64
+	PricedEventCount       int64
+	SessionCount           int64
+	IncompleteSessionCount int64
+	SourceCount            int64
+	PartialSourceCount     int64
+}
+
+func (q *Queries) GetUsageAnalyticsCoverage(ctx context.Context, arg GetUsageAnalyticsCoverageParams) (GetUsageAnalyticsCoverageRow, error) {
+	row := q.db.QueryRowContext(ctx, getUsageAnalyticsCoverage,
+		arg.StartAt,
+		arg.EndAt,
+		arg.ProjectID,
+		arg.Harness,
+		arg.ModelID,
+	)
+	var i GetUsageAnalyticsCoverageRow
+	err := row.Scan(
+		&i.EventCount,
+		&i.PricedEventCount,
+		&i.SessionCount,
+		&i.IncompleteSessionCount,
+		&i.SourceCount,
+		&i.PartialSourceCount,
+	)
+	return i, err
+}
+
 const getUsageBindingBySessionHarnessRoot = `-- name: GetUsageBindingBySessionHarnessRoot :one
 SELECT id, session_id, harness, native_root_id, initial_model_id, state, last_error_code, updated_at, provider_hint
 FROM usage_bindings
@@ -946,6 +1005,149 @@ func (q *Queries) ListLegacyUsageSourceIDs(ctx context.Context) ([]int64, error)
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsageAnalyticsHourlyAggregates = `-- name: ListUsageAnalyticsHourlyAggregates :many
+SELECT
+    mue.created_at AS bucket_at,
+    s.project_id,
+    COALESCE(NULLIF(p.display_name, ''), s.project_id) AS project_name,
+    ub.harness,
+    mue.model_id,
+    CAST(COUNT(*) AS INTEGER) AS event_count,
+    CAST(COALESCE(SUM(mue.input_tokens), 0) AS INTEGER) AS input_tokens,
+    CAST(COUNT(mue.input_tokens) AS INTEGER) AS known_input_token_count,
+    CAST(COALESCE(SUM(mue.cached_input_tokens), 0) AS INTEGER) AS cached_input_tokens,
+    CAST(COUNT(mue.cached_input_tokens) AS INTEGER) AS known_cached_input_token_count,
+    CAST(COALESCE(SUM(mue.uncached_input_tokens), 0) AS INTEGER) AS uncached_input_tokens,
+    CAST(COUNT(mue.uncached_input_tokens) AS INTEGER) AS known_uncached_input_token_count,
+    CAST(COALESCE(SUM(mue.output_tokens), 0) AS INTEGER) AS output_tokens,
+    CAST(COUNT(mue.output_tokens) AS INTEGER) AS known_output_token_count,
+    CAST(COUNT(mue.estimated_cost_nanos) AS INTEGER) AS priced_event_count,
+    CAST(COALESCE(SUM(mue.estimated_cost_nanos), 0) AS INTEGER) AS priced_total_nanos,
+    CAST(COUNT(CASE WHEN mue.billing_provider_source = 'observed' AND (
+        mue.estimated_cost_nanos IS NOT NULL OR mue.input_cost_nanos IS NOT NULL OR
+        mue.cached_input_cost_nanos IS NOT NULL OR mue.output_cost_nanos IS NOT NULL
+    ) THEN 1 END) AS INTEGER) AS observed_cost_event_count,
+    CAST(COUNT(CASE WHEN mue.billing_provider_source = 'inferred' AND (
+        mue.estimated_cost_nanos IS NOT NULL OR mue.input_cost_nanos IS NOT NULL OR
+        mue.cached_input_cost_nanos IS NOT NULL OR mue.output_cost_nanos IS NOT NULL
+    ) THEN 1 END) AS INTEGER) AS inferred_cost_event_count,
+    CAST(COUNT(mue.input_cost_nanos) AS INTEGER) AS known_input_count,
+    CAST(COALESCE(SUM(mue.input_cost_nanos), 0) AS INTEGER) AS known_input_nanos,
+    CAST(COALESCE(SUM(CASE WHEN mue.estimated_cost_nanos IS NULL THEN mue.input_cost_nanos END), 0) AS INTEGER) AS unpriced_known_input_nanos,
+    CAST(COUNT(mue.cached_input_cost_nanos) AS INTEGER) AS known_cached_input_count,
+    CAST(COALESCE(SUM(mue.cached_input_cost_nanos), 0) AS INTEGER) AS known_cached_input_nanos,
+    CAST(COALESCE(SUM(CASE WHEN mue.estimated_cost_nanos IS NULL THEN mue.cached_input_cost_nanos END), 0) AS INTEGER) AS unpriced_known_cached_input_nanos,
+    CAST(COUNT(mue.output_cost_nanos) AS INTEGER) AS known_output_count,
+    CAST(COALESCE(SUM(mue.output_cost_nanos), 0) AS INTEGER) AS known_output_nanos,
+    CAST(COALESCE(SUM(CASE WHEN mue.estimated_cost_nanos IS NULL THEN mue.output_cost_nanos END), 0) AS INTEGER) AS unpriced_known_output_nanos
+FROM model_usage_events mue
+JOIN usage_bindings ub ON ub.id = mue.binding_id
+JOIN sessions s ON s.id = ub.session_id
+JOIN projects p ON p.id = s.project_id
+WHERE mue.created_at >= ?1
+  AND mue.created_at < ?2
+  AND (?3 = '' OR s.project_id = ?3)
+  AND (?4 = '' OR ub.harness = ?4)
+  AND (?5 = '' OR mue.model_id = ?5)
+GROUP BY mue.created_at, s.project_id, project_name, ub.harness, mue.model_id
+ORDER BY mue.created_at, s.project_id, ub.harness, mue.model_id
+`
+
+type ListUsageAnalyticsHourlyAggregatesParams struct {
+	StartAt   sql.NullTime
+	EndAt     sql.NullTime
+	ProjectID interface{}
+	Harness   interface{}
+	ModelID   interface{}
+}
+
+type ListUsageAnalyticsHourlyAggregatesRow struct {
+	BucketAt                      sql.NullTime
+	ProjectID                     *domain.ProjectID
+	ProjectName                   *domain.ProjectID
+	Harness                       domain.AgentHarness
+	ModelID                       string
+	EventCount                    int64
+	InputTokens                   int64
+	KnownInputTokenCount          int64
+	CachedInputTokens             int64
+	KnownCachedInputTokenCount    int64
+	UncachedInputTokens           int64
+	KnownUncachedInputTokenCount  int64
+	OutputTokens                  int64
+	KnownOutputTokenCount         int64
+	PricedEventCount              int64
+	PricedTotalNanos              int64
+	ObservedCostEventCount        int64
+	InferredCostEventCount        int64
+	KnownInputCount               int64
+	KnownInputNanos               int64
+	UnpricedKnownInputNanos       int64
+	KnownCachedInputCount         int64
+	KnownCachedInputNanos         int64
+	UnpricedKnownCachedInputNanos int64
+	KnownOutputCount              int64
+	KnownOutputNanos              int64
+	UnpricedKnownOutputNanos      int64
+}
+
+func (q *Queries) ListUsageAnalyticsHourlyAggregates(ctx context.Context, arg ListUsageAnalyticsHourlyAggregatesParams) ([]ListUsageAnalyticsHourlyAggregatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUsageAnalyticsHourlyAggregates,
+		arg.StartAt,
+		arg.EndAt,
+		arg.ProjectID,
+		arg.Harness,
+		arg.ModelID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsageAnalyticsHourlyAggregatesRow{}
+	for rows.Next() {
+		var i ListUsageAnalyticsHourlyAggregatesRow
+		if err := rows.Scan(
+			&i.BucketAt,
+			&i.ProjectID,
+			&i.ProjectName,
+			&i.Harness,
+			&i.ModelID,
+			&i.EventCount,
+			&i.InputTokens,
+			&i.KnownInputTokenCount,
+			&i.CachedInputTokens,
+			&i.KnownCachedInputTokenCount,
+			&i.UncachedInputTokens,
+			&i.KnownUncachedInputTokenCount,
+			&i.OutputTokens,
+			&i.KnownOutputTokenCount,
+			&i.PricedEventCount,
+			&i.PricedTotalNanos,
+			&i.ObservedCostEventCount,
+			&i.InferredCostEventCount,
+			&i.KnownInputCount,
+			&i.KnownInputNanos,
+			&i.UnpricedKnownInputNanos,
+			&i.KnownCachedInputCount,
+			&i.KnownCachedInputNanos,
+			&i.UnpricedKnownCachedInputNanos,
+			&i.KnownOutputCount,
+			&i.KnownOutputNanos,
+			&i.UnpricedKnownOutputNanos,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

@@ -1714,6 +1714,95 @@ func TestUsageSessionAggregatesParentChildAndMultipleBindingsExactlyOnce(t *test
 	}
 }
 
+func TestUsageAnalyticsAggregatesFilterByRangeProjectHarnessAndModel(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	seedProject(t, s, "usage")
+	seedProject(t, s, "other")
+	usageRec := sampleRecord("usage")
+	usageRec.Harness = domain.HarnessCodex
+	usageSession, err := s.CreateSession(ctx, usageRec)
+	mustNoError(t, err, "create usage session")
+	otherRec := sampleRecord("other")
+	otherRec.Harness = domain.HarnessCodex
+	otherSession, err := s.CreateSession(ctx, otherRec)
+	mustNoError(t, err, "create other session")
+
+	usageSource := seedUsageSource(t, s, usageSession, now)
+	events := []domain.ModelUsageEvent{
+		usageEvent("usage-1", canonicalUsageTokens(100, 40, 60, 20)),
+		usageEvent("usage-2", canonicalUsageTokens(50, 0, 50, 10)),
+		usageEvent("usage-other-model", canonicalUsageTokens(30, 0, 30, 5)),
+	}
+	events[0].CreatedAt = time.Date(2026, 9, 30, 17, 30, 0, 0, time.UTC)
+	events[0].BillingProviderID = "openai"
+	events[0].BillingProviderSource = domain.UsageBillingProviderObserved
+	events[0].Costs = domain.UsageEventCosts{
+		InputCostNanos: value(70), CachedInputCostNanos: value(10),
+		OutputCostNanos: value(30), EstimatedCostNanos: value(100), PricingVersion: "openai-v1",
+	}
+	events[1].CreatedAt = time.Date(2026, 9, 30, 18, 15, 0, 0, time.UTC)
+	events[1].BillingProviderID = "openai"
+	events[1].BillingProviderSource = domain.UsageBillingProviderObserved
+	events[1].Costs = domain.UsageEventCosts{
+		InputCostNanos: value(20), CachedInputCostNanos: value(0),
+		OutputCostNanos: value(5), PricingVersion: "openai-v1",
+	}
+	events[2].ModelID = "gpt-other"
+	events[2].CreatedAt = time.Date(2026, 9, 30, 18, 30, 0, 0, time.UTC)
+	if err := s.ApplyUsageChunk(ctx, usageSource.ID, 0, usageSource.UpdatedAt, domain.SourceCursorState{
+		ByteOffset: 10, State: domain.UsageSourceComplete, UpdatedAt: now,
+	}, events); err != nil {
+		t.Fatalf("apply usage analytics events: %v", err)
+	}
+	if _, err := s.MarkUsageSourceState(ctx, usageSource.ID, domain.UsageSourceComplete, domain.UsageErrorSourceEventConflict, nil, now); err != nil {
+		t.Fatalf("mark partial source: %v", err)
+	}
+
+	otherSource := seedUsageSource(t, s, otherSession, now)
+	otherEvent := usageEvent("other-1", canonicalUsageTokens(999, 0, 999, 1))
+	otherEvent.CreatedAt = time.Date(2026, 9, 30, 18, 0, 0, 0, time.UTC)
+	if err := s.ApplyUsageChunk(ctx, otherSource.ID, 0, otherSource.UpdatedAt, domain.SourceCursorState{
+		ByteOffset: 10, State: domain.UsageSourceComplete, UpdatedAt: now,
+	}, []domain.ModelUsageEvent{otherEvent}); err != nil {
+		t.Fatalf("apply other analytics event: %v", err)
+	}
+
+	filter := domain.UsageAnalyticsFilter{
+		ProjectID: "usage", Harness: domain.HarnessCodex, ModelID: "gpt-5",
+		Start: time.Date(2026, 9, 30, 17, 0, 0, 0, time.UTC),
+		End:   time.Date(2026, 9, 30, 19, 0, 0, 0, time.UTC),
+	}
+	rows, err := s.ListUsageAnalyticsHourlyAggregates(ctx, filter)
+	mustNoError(t, err, "list usage analytics aggregates")
+	if len(rows) != 2 {
+		t.Fatalf("analytics rows = %+v, want two hourly gpt-5 rows", rows)
+	}
+	if !rows[0].BucketHourUTC.Equal(filter.Start) || rows[0].ProjectID != "usage" ||
+		rows[0].ProjectName != "usage" || rows[0].Harness != domain.HarnessCodex ||
+		rows[0].ModelID != "gpt-5" ||
+		usageTokenValue(rows[0].Tokens.InputTokens) != 100 ||
+		usageTokenValue(rows[0].Tokens.OutputTokens) != 20 ||
+		rows[0].Cost.PricedEventCount != 1 || rows[0].Cost.PricedTotalNanos != 100 {
+		t.Fatalf("first analytics row = %+v", rows[0])
+	}
+	if !rows[1].BucketHourUTC.Equal(time.Date(2026, 9, 30, 18, 0, 0, 0, time.UTC)) ||
+		usageTokenValue(rows[1].Tokens.InputTokens) != 50 ||
+		rows[1].Cost.PricedEventCount != 0 || rows[1].Cost.UnpricedKnownInputNanos != 20 ||
+		rows[1].Cost.UnpricedKnownOutputNanos != 5 {
+		t.Fatalf("second analytics row = %+v", rows[1])
+	}
+	coverage, err := s.GetUsageAnalyticsCoverage(ctx, filter)
+	mustNoError(t, err, "get usage analytics coverage")
+	if coverage.EventCount != 2 || coverage.PricedEventCount != 1 ||
+		coverage.UnpricedEventCount != 1 || coverage.SessionCount != 1 ||
+		coverage.IncompleteSessionCount != 1 || coverage.SourceCount != 1 ||
+		coverage.PartialSourceCount != 1 {
+		t.Fatalf("coverage = %+v", coverage)
+	}
+}
+
 func seedUsageSession(t *testing.T, s *sqlite.Store, harness domain.AgentHarness) domain.SessionRecord {
 	t.Helper()
 	ctx := context.Background()
@@ -1887,6 +1976,8 @@ func canonicalUsageTokens(input, cachedInput, uncachedInput, output int64) domai
 		OutputTokens: &output,
 	}
 }
+
+func value(v int64) *int64 { return &v }
 
 func usageTokenValue(value *int64) int64 {
 	if value == nil {

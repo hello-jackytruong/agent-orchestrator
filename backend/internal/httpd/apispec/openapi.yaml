@@ -9257,6 +9257,76 @@ paths:
       summary: Cancel an unclaimed speculative task worktree
       tags:
       - projects
+  /api/v1/usage/analytics:
+    get:
+      operationId: getUsageAnalytics
+      parameters:
+      - in: query
+        name: projectId
+        schema:
+          type: string
+      - in: query
+        name: harness
+        schema:
+          type: string
+      - in: query
+        name: modelId
+        schema:
+          type: string
+      - description: Inclusive RFC3339 instant or YYYY-MM-DD local date.
+        in: query
+        name: start
+        schema:
+          description: Inclusive RFC3339 instant or YYYY-MM-DD local date.
+          type: string
+      - description: Exclusive RFC3339 instant or YYYY-MM-DD local date.
+        in: query
+        name: end
+        schema:
+          description: Exclusive RFC3339 instant or YYYY-MM-DD local date.
+          type: string
+      - description: IANA timezone used for local day and week buckets.
+        in: query
+        name: timezone
+        schema:
+          description: IANA timezone used for local day and week buckets.
+          type: string
+      - in: query
+        name: granularity
+        schema:
+          enum:
+          - hour
+          - day
+          - week
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageAnalyticsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Get range-based token and estimated cost analytics
+      tags:
+      - usage
   /api/v1/usage/memory/pressure:
     get:
       operationId: getMemoryPressure
@@ -15931,6 +16001,179 @@ components:
       - path
       - content
       - expectedFileFingerprint
+      type: object
+    UsageAnalyticsBucketResponse:
+      properties:
+        end:
+          format: date-time
+          type: string
+        eventCount:
+          format: int64
+          minimum: 0
+          type: integer
+        start:
+          format: date-time
+          type: string
+        totals:
+          $ref: '#/components/schemas/UsageTotalsResponse'
+      required:
+      - start
+      - end
+      - eventCount
+      - totals
+      type: object
+    UsageAnalyticsCoverageResponse:
+      properties:
+        eventCount:
+          format: int64
+          minimum: 0
+          type: integer
+        incompleteSessionCount:
+          format: int64
+          minimum: 0
+          type: integer
+        partialSourceCount:
+          format: int64
+          minimum: 0
+          type: integer
+        pricedEventCount:
+          format: int64
+          minimum: 0
+          type: integer
+        sessionCount:
+          format: int64
+          minimum: 0
+          type: integer
+        sourceCount:
+          format: int64
+          minimum: 0
+          type: integer
+        supportedSources:
+          items:
+            type: string
+          type: array
+        unpricedEventCount:
+          format: int64
+          minimum: 0
+          type: integer
+      required:
+      - eventCount
+      - pricedEventCount
+      - unpricedEventCount
+      - sessionCount
+      - incompleteSessionCount
+      - sourceCount
+      - partialSourceCount
+      - supportedSources
+      type: object
+    UsageAnalyticsHarnessResponse:
+      properties:
+        eventCount:
+          format: int64
+          minimum: 0
+          type: integer
+        harness:
+          type: string
+        totals:
+          $ref: '#/components/schemas/UsageTotalsResponse'
+      required:
+      - harness
+      - eventCount
+      - totals
+      type: object
+    UsageAnalyticsModelResponse:
+      properties:
+        eventCount:
+          format: int64
+          minimum: 0
+          type: integer
+        harness:
+          type: string
+        modelId:
+          type: string
+        totals:
+          $ref: '#/components/schemas/UsageTotalsResponse'
+      required:
+      - harness
+      - modelId
+      - eventCount
+      - totals
+      type: object
+    UsageAnalyticsProjectResponse:
+      properties:
+        eventCount:
+          format: int64
+          minimum: 0
+          type: integer
+        projectId:
+          type: string
+        projectName:
+          type: string
+        totals:
+          $ref: '#/components/schemas/UsageTotalsResponse'
+      required:
+      - projectId
+      - projectName
+      - eventCount
+      - totals
+      type: object
+    UsageAnalyticsResponse:
+      properties:
+        coverage:
+          $ref: '#/components/schemas/UsageAnalyticsCoverageResponse'
+        dailyBuckets:
+          items:
+            $ref: '#/components/schemas/UsageAnalyticsBucketResponse'
+          type: array
+        end:
+          format: date-time
+          type: string
+        granularity:
+          enum:
+          - hour
+          - day
+          - week
+          type: string
+        harnesses:
+          items:
+            $ref: '#/components/schemas/UsageAnalyticsHarnessResponse'
+          type: array
+        hourlyBuckets:
+          items:
+            $ref: '#/components/schemas/UsageAnalyticsBucketResponse'
+          type: array
+        models:
+          items:
+            $ref: '#/components/schemas/UsageAnalyticsModelResponse'
+          type: array
+        projects:
+          items:
+            $ref: '#/components/schemas/UsageAnalyticsProjectResponse'
+          type: array
+        start:
+          format: date-time
+          type: string
+        timeSeries:
+          items:
+            $ref: '#/components/schemas/UsageAnalyticsBucketResponse'
+          type: array
+        timezone:
+          type: string
+        totals:
+          $ref: '#/components/schemas/UsageTotalsResponse'
+      required:
+      - start
+      - end
+      - timezone
+      - granularity
+      - totals
+      - dailyBuckets
+      - hourlyBuckets
+      - timeSeries
+      - projects
+      - models
+      - harnesses
+      - coverage
       type: object
     UsageHarnessResponse:
       properties:
